@@ -1,0 +1,3 @@
+nicegui
+polars
+arrow_odbc

@@ -3,8 +3,11 @@ from sql import sqlpd, phierarchy, lhierarchy
 import polars as pl
 import os
 from script import forecast
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 ui.colors(brand='#ffb500')
+today=datetime.today()
 
 navcl='w-24 drop-shadow-none shadow-none text-[#000] hover:bg-black hover:font-brand hover:text-[#ffb500] rounded-none transition-all duration-200 ease-linear'
 def nav():
@@ -41,6 +44,14 @@ async def home():
         print(app.storage.tab.get('lh'))
         print(app.storage.tab.get('loc'))
         df1=df.filter(pl.col(app.storage.tab.get('lh')).is_in(app.storage.tab.get('loc'))).filter(pl.col(app.storage.tab.get('ph')).is_in(app.storage.tab.get('prod')))
+        df1=df1.with_columns(pl.col('SALES_DATE').dt.month().alias('Month'))
+        #df1=df1.with_columns(pl.col('Month').str.to_integer())
+        print(df1)
+        df1=df1.with_columns(pl.col('SALES_DATE').dt.year().alias('Year'))
+        df1=df1.with_columns(ActWFC=pl.when(pl.col('SALES_DATE')<today-relativedelta(months=1)).then(pl.col('`Act Orders Rev')).otherwise(pl.col('`Fcst Stat Prelim Rev')))
+        app.storage.tab['ddf']=df1.pivot(on='Month',index=[app.storage.tab['ph'],'Year'],values='ActWFC',aggregate_function='sum',sort_columns=True)
+        #app.storage.tab['ddf']=app.storage.tab['ddf'][[app.storage.tab['ph'],'Year']+df1['Month'].unique().cast(pl.Utf8).to_list()]
+        app.storage.tab['ddf']=app.storage.tab['ddf'][[app.storage.tab['ph'],'Year']+[str(i) for i in range(1,13)]]
         reft.refresh()
 
     @ui.refreshable
@@ -63,7 +74,8 @@ async def home():
         with ui.tab_panel(one):
             @ui.refreshable
             def reft():
-                ui.table.from_polars(df1.group_by([loc_lvl.value,prod_lvl.value]).sum()[loc_lvl.value,prod_lvl.value,'`Act Orders Rev','`Fcst Stat Prelim Rev'])
+                #ui.table.from_polars(df1.group_by([loc_lvl.value,prod_lvl.value]).sum()[loc_lvl.value,prod_lvl.value,'`Act Orders Rev','`Fcst Stat Prelim Rev'])
+                ui.table.from_polars(app.storage.tab.get('ddf'))
             reft()
             fb=ui.button('Forecast',color='brand',on_click=forecast(df1.group_by([loc_lvl.value,prod_lvl.value]).sum()['`Act Orders Rev']))
         with ui.tab_panel(two):

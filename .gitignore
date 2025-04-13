@@ -1,5 +1,5 @@
-__pycache__/*
-data/*
 models/*
-mod/*
-gguf/*
+data/*
+ui/__pycache__/*
+models/__pycache__/*
+services/__pycache__/*

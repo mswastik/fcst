@@ -14,26 +14,16 @@ def apply_filters(filters):
         # Apply data files filter (placeholder)
         pass
         
-    #if filters.get('location1'):
-    #    mask &= df['location'] == filters['location1']
-        
     if filters.get('location2') and filters.get('location1'):
        df = df.filter(pl.col(filters['location1']) == filters['location2'])
         
-    #if filters.get('product1'):
-    #    mask &= df['product'] == filters['product1']
-        
     if filters.get('product2') and filters.get('product1'):
         df = df.filter(pl.col(filters['product1']) == filters['product2'])
-        
-    #if filters.get('level'):
-    #    mask &= df['level'] == filters['level']
     
     # Update global filtered dataframe
     filtered_df = df
     
     # Update filtered products list
-    print(filters['product2'])
     try:
         filtered_products = filtered_df[filters['product2']].unique().tolist()
     except:

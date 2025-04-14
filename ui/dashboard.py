@@ -1,12 +1,15 @@
-from nicegui import ui
+from nicegui import ui,run
 from models.data_model import get_filter_options, filtered_products, filtered_models
 from services.data_service import (
     apply_filters, toggle_month_view, create_models_action, 
     generate_fc_action, change_fc_action, download_data_action, export_data_action
 )
+from sql import sqlpd
 from ui.charts import update_charts
 import os
+import asyncio
 
+@ui.page("/")
 def create_dashboard():
     """Create the main dashboard UI"""
     # Get filter options
@@ -54,7 +57,20 @@ def create_dashboard():
     async def on_filter_change(filter_name, value):
         """Handle filter change events"""
         filter_state[filter_name] = value
-        print(filter_state.get(filter_name))
+        if filter_name=='location1':
+            location_select2._props.update({'label':value})
+            if filter_state.get('product1')!=None:
+                location_select2.options=get_filter_options(filter_state.get('product1'),filter_state.get('location1'))['locations_filt']
+            else:
+                location_select2.options=get_filter_options(loc=filter_state.get('location1'))['locations_filt']
+            location_select2.update()
+        if filter_name=='product1':
+            product_select2._props.update({'label':value})
+            if filter_state.get('location1')!=None:
+                product_select2.options=get_filter_options(filter_state.get('product1'),filter_state.get('location1'))['products_filt']
+            else:
+                product_select2.options=get_filter_options(prod=filter_state.get('product1'))['products_filt']
+            product_select2.update()
         if ((filter_state.get('location2')) and (filter_state.get('location1'))) or ((filter_state.get('product2')) and (filter_state.get('product1'))):
             filtered_df = apply_filters(filter_state)
             await update_ui(filtered_df['filtered_df'])
@@ -63,6 +79,25 @@ def create_dashboard():
         """Handle month view toggle"""
         toggle_month_view(e.value)
         update_charts(column_chart_container, line_chart_container)
+    
+    def dwn_diag(lh,lv,ph,pv,fm,e):
+        #asyncio.run(sqlpd(lh,lv,ph,pv,fm))
+        run.io_bound(sqlpd,lh,lv,ph,pv,fm)
+
+    def on_download(e):
+        with ui.dialog() as dialog, ui.card():
+            ui.label("Select filter parameters to download")
+            with ui.row():
+                lh=ui.select(options=['StrykerGroupRegion','Region','Country'],label='Location').classes('w-48')
+                lv=ui.input(label='Location Values',placeholder='Enter comma seperated values').classes('w-80')
+            with ui.row():
+                ph=ui.select(options=['Franchise','BusinessUnit','IBPLevel5','CatalogNumer'],label='Product').classes('w-48')
+                pv=ui.input(label='Product Values',placeholder='Enter comma seperated values').classes('w-80')
+            with ui.row():
+                pm=ui.number(label='Past Months')
+                fm=ui.number(label='Future Months')
+            ui.button('Download',on_click=dwn_diag(lh.value,lv.value,ph.value,pv.value,fm.value,e))
+        dialog.open()
     
     # Create UI layout
     with ui.card().classes('w-full p-4'):
@@ -77,28 +112,28 @@ def create_dashboard():
             
             location_select1 = ui.select(
                 label='Location',
-                options=[''] + options['locations'],
+                options=options['locations'],
                 with_input=True,
                 on_change=lambda e: on_filter_change('location1', e.value)
             ).classes('w-40').bind_value(filter_state,'location1')
             
             location_select2 = ui.select(
                 label='Location',
-                options=[''] + options['locations_filt'],
+                options= options['locations_filt'],
                 with_input=True,
                 on_change=lambda e: on_filter_change('location2', e.value)
             ).classes('w-40').bind_value(filter_state,'location2')
             
             product_select1 = ui.select(
                 label='Product',
-                options=[''] + options['products'],
+                options=options['products'],
                 with_input=True,
                 on_change=lambda e: on_filter_change('product1', e.value)
             ).classes('w-40').bind_value(filter_state,'product1')
             
             product_select2 = ui.select(
                 label='Product',
-                options=[''] + options['products_filt'],
+                options= options['products_filt'],
                 with_input=True,
                 on_change=lambda e: on_filter_change('product2', e.value)
             ).classes('w-40').bind_value(filter_state,'product2')
@@ -109,7 +144,8 @@ def create_dashboard():
                 with_input=True,
                 on_change=lambda e: on_filter_change('level', e.value)
             ).classes('w-40')
-            ui.button('Download Data', on_click=lambda: ui.notify(download_data_action(), type='info')).classes('ml-auto')
+            #ui.button('Download Data', on_click=lambda: ui.notify(download_data_action(), type='info')).classes('ml-auto')
+            ui.button('Download Data', on_click=on_download).classes('ml-auto')
         
         # Main content area
         with ui.row().classes('w-full mt-2 ml-0 gap-2'):

@@ -14,7 +14,7 @@ except:
     past_months=36
 ss="gda-globalsynapseanalytics-ws-prod.sql.azuresynapse.net"
 
-async def sqlpd(loc,reg,prod,fn,nm):
+def sqlpd(loc='',reg='',prod='',fn='',nm=6):
     query=f'''
     SELECT
         [SellingDivision] as [Selling Division],[COUNTRY_GROUP] 'Area',[StrykerGroupRegion] as [Stryker Group Region],[Region],[Country],p.[CatalogNumber],
@@ -39,12 +39,10 @@ async def sqlpd(loc,reg,prod,fn,nm):
 
     WHERE
         [SALES_DATE] BETWEEN DATEADD(month, {past_months}, GETDATE()) AND DATEADD(month, {fn}, GETDATE()) AND
-        [{loc.replace(' ','')}] in ('{reg}') AND
-        --[{loc.replace(' ','')}] in ('APAC','EUROPE','CANADA','EEMEA','EUROPE','LATIN AMERICA','UNITED STATES') AND
-        --p.Franchise IN ('CMF','Endoscopy','Instruments','Joint Replacement','Spine','Trauma and Extremities')
+        [{loc}] in ('{reg}') AND
         --p.Franchise IN ('{fn}')
         --p.Franchise IN ({(','.join('?'*len(fn)))})
-        [{prod.replace(' ','')}] IN ({(','.join('?'*len(fn)))})
+        [{prod}] IN ({(','.join('?'*len(fn)))})
             
     GROUP BY
         [SellingDivision],[COUNTRY_GROUP],[StrykerGroupRegion],[Region],[Country],p.[BusinessSector],p.[BusinessUnit],p.[Franchise],
@@ -53,7 +51,7 @@ async def sqlpd(loc,reg,prod,fn,nm):
     reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
     df1=pl.DataFrame()
     for batch in reader:
-        df1= pl.concat([df1,await run.io_bound(pl.from_arrow,batch)])
+        df1= pl.concat([df1, run.io_bound(pl.from_arrow,batch)])
     print('Done!!!')
     df1=df1.with_columns(pl.col('SALES_DATE').cast(pl.Datetime).dt.cast_time_unit('us'))
     df1.write_csv(f'C:\\Users\\{os.getlogin()}\\Downloads\\temp.csv')

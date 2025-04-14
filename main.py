@@ -10,7 +10,7 @@ def main():
     create_dashboard()
     
     # Run the app
-    ui.run(title="Product Dashboard")
+    ui.run(title="Product Dashboard",reconnect_timeout=700)
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()

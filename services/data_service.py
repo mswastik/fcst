@@ -8,7 +8,7 @@ def apply_filters(filters):
     from models.data_model import df, filtered_df, filtered_products, filtered_models
     
     #mask = pd.Series(True, index=df.index)
-    mask=pl.Series([True])
+    #mask=pl.Series([True])
     
     if filters.get('data_files'):
         # Apply data files filter (placeholder)
@@ -17,24 +17,27 @@ def apply_filters(filters):
     #if filters.get('location1'):
     #    mask &= df['location'] == filters['location1']
         
-    if filters.get('location2'):
-        mask &= df[filters['location1']] == filters['location2']
+    if filters.get('location2') and filters.get('location1'):
+       df = df.filter(pl.col(filters['location1']) == filters['location2'])
         
     #if filters.get('product1'):
     #    mask &= df['product'] == filters['product1']
         
-    if filters.get('product2'):
-        mask &= df[filters['product1']] == filters['product2']
+    if filters.get('product2') and filters.get('product1'):
+        df = df.filter(pl.col(filters['product1']) == filters['product2'])
         
     #if filters.get('level'):
     #    mask &= df['level'] == filters['level']
     
     # Update global filtered dataframe
-    filtered_df = df[mask]
+    filtered_df = df
     
     # Update filtered products list
-    filtered_products = filtered_df['product'].unique().tolist()
-    
+    print(filters['product2'])
+    try:
+        filtered_products = filtered_df[filters['product2']].unique().tolist()
+    except:
+        pass
     # Update models list (placeholder for real model data)
     filtered_models = [f"Model for {product}" for product in filtered_products]
     

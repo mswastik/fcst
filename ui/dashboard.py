@@ -135,7 +135,7 @@ def create_dashboard():
         dialog.open()
     
     # Create UI layout
-    with ui.card().classes('w-full p-4'):
+    with ui.card().classes('w-full h-full p-2'):
         # Filters row
         with ui.row().classes('w-full gap-2'):
             data_files_select = ui.select(
@@ -222,10 +222,10 @@ def create_dashboard():
                     ui.button('Export', on_click=lambda: ui.notify(export_data_action(), type='info'))
         
         # Bottom details panel
-        with ui.card().classes('w-full mt-4 p-4 h-48'):
-            details_container = ui.column().classes('w-full')
+        with ui.card().classes('w-full m-0 p-0 h-full'):
+            details_container = ui.column().classes('w-full h-full')
             with details_container:
-                ui.label('Selected Product and Model data').classes('text-lg font-bold')
+                ui.label('Select Product and Model data').classes('p-2 text-lg font-bold')
                 
     
     # Initialize UI with current data

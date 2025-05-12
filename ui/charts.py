@@ -17,7 +17,8 @@ def render_column_chart(container,filtered_df):
                     'name': 'values',
                     'data': [[data['categories'][i],data['values'][i]] for i in range(len(data['categories']))],
                     'colorByPoint': True
-                }]
+                }],
+                'tooltip':{},
             }).classes('w-full h-full')
         else:
             ui.label('No data to display').classes('text-center text-gray-500')
@@ -38,7 +39,8 @@ def render_line_chart(container,filtered_df):
                     'name': 'Trend',
                     'data': [[data['categories'][i],data['values'][i]] for i in range(len(data['categories']))],
                     'marker': {'enabled': True}
-                }]
+                }],
+                'tooltip':{},
             }).classes('w-full h-full')
         else:
             ui.label('No data to display').classes('text-center text-gray-500')

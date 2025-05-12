@@ -21,6 +21,10 @@ def apply_filters(filters):
         df = df.filter(pl.col(filters['product1']) == filters['product2'])
     
     # Update global filtered dataframe
+    if filters.get('level'):
+        df=df.group_by(['SALES_DATE',filters['level'],filters['location1']]).sum()
+    else:
+        df=df.group_by(['SALES_DATE',filters['product1'],filters['location1']]).sum()
     filtered_df = df
     
     # Update filtered products list

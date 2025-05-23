@@ -70,6 +70,7 @@ def create_dashboard():
     
     async def on_filter_change(filter_name, value):
         """Handle filter change events"""
+        global filtered_df
         filter_state[filter_name] = value
         if filter_name=='data_files':
             #dwn.df=pl.read_parquet(f'data/{value}')
@@ -91,6 +92,8 @@ def create_dashboard():
         if ((filter_state.get('location2')) and (filter_state.get('location1'))) or ((filter_state.get('product2')) and (filter_state.get('product1'))):
             filtered_df = apply_filters(filter_state)
             await update_ui(filtered_df['filtered_df'])
+        filtered_df=filtered_df['filtered_df']
+
     
     def on_month_toggle(e):
         """Handle month view toggle"""
@@ -112,6 +115,9 @@ def create_dashboard():
             dwn.row_lab = await run.io_bound(query_st,dwn.lhv,dwn.lvv,dwn.phv,dwn.pvv,dwn.fmv)
             dwn.sp = await run.io_bound(sqlpd,dwn.lhv,dwn.lvv,dwn.phv,dwn.pvv,dwn.fmv)
             timer.deactivate()
+            timestamp = pl.datetime(pl.datetime_range(start=pl.datetime(2023, 1, 1), end=pl.datetime(2023, 1, 1), interval="1d").max())
+            file_name = f"data/downloaded_data_{timestamp.now().strftime('%Y%m%d_%H%M%S')}.parquet"
+            pl.DataFrame(dwn.sp).write_parquet(file_name)
 
         with ui.dialog() as dialog, ui.card():
             ui.label("Select filter parameters to download")
@@ -216,7 +222,7 @@ def create_dashboard():
                     ui.label('By Month')
                 
                 with ui.row().classes('gap-2'):
-                    ui.button('Create Models', on_click=lambda: ui.notify(create_models_action(), type='info')).classes('bg-green-100')
+                    ui.button('Create Models', on_click=lambda: ui.notify(create_models_action(filtered_df), type='info')).classes('bg-green-100')
                     ui.button('Generate FC', on_click=lambda: ui.notify(generate_fc_action(), type='info')).classes('bg-green-100')
                     ui.button('Change FC', on_click=lambda: ui.notify(change_fc_action(), type='info')).classes('bg-green-100')
                     ui.button('Export', on_click=lambda: ui.notify(export_data_action(), type='info'))

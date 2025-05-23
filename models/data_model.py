@@ -18,9 +18,9 @@ try:
 except:
     products_filt=[]
     locations_filt=[]
-products = ["CatalogNumber", "IBP Level 5", "IBP Level 6"]
+products = ["Franchise", "IBP Level 5", "IBP Level 6","CatalogNumber"]
 locations = ['Area','Region','Country']
-levels = ["CatalogNumber", "IBP Level 5", "IBP Level 6"]
+levels = ["Franchise", "IBP Level 5", "IBP Level 6","CatalogNumber"]
 
 def initialize_data():
     """Initialize the application data"""

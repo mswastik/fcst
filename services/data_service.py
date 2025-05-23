@@ -2,6 +2,98 @@ import pandas as pd
 import polars as pl
 from models.data_model import df, filtered_df, filtered_products, filtered_models, by_month
 
+
+from neuralforecast import NeuralForecast
+from neuralforecast.models import NHITS
+from neuralforecast.losses.pytorch import MSE
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+import pandas as pd
+from tqdm import tqdm
+
+from datetime import datetime
+import pandas as pd
+from dateutil.relativedelta import relativedelta
+
+def clean_data(df):
+    df=df.to_pandas()
+    # Columns to drop
+    columns_to_drop = [
+        'UOM', 'NPI Flag', 'Pack Content', '`L0 ASP Final Rev',
+        'Act Orders Rev Val', 'L2 DF Final Rev', 'L1 DF Final Rev',
+        'L0 DF Final Rev', 'L2 Stat Final Rev', '`Fcst DF Final Rev',
+        '`Fcst Stat Final Rev', '`Fcst Stat Prelim Rev', 'Fcst DF Final Rev Val'
+    ]
+    
+    # Drop columns if they exist in the dataframe
+    df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+    
+    # Fill NaN values with 0
+    df = df.fillna(0)
+    
+    return df
+
+
+def add_unique_id(df):
+    # Create unique_id by concatenating multiple columns
+    df["unique_id"] = df['Selling Division'].astype(str) + "," + \
+                      df['Area'].astype(str) + "," + \
+                      df['Stryker Group Region'].astype(str) + "," + \
+                      df['Region'].astype(str) + "," + \
+                      df['Country'].astype(str) + "," + \
+                      df['Business Sector'].astype(str) + "," + \
+                      df['Business Unit'].astype(str) + "," + \
+                      df['Franchise'].astype(str) + "," + \
+                      df['Product Line'].astype(str) + "," + \
+                      df['IBP Level 5'].astype(str) + "," + \
+                      df['IBP Level 6'].astype(str) + "," + \
+                      df['IBP Level 7'].astype(str) + "," + \
+                      df['CatalogNumber'].astype(str)
+    
+    return df
+
+
+def filter_last_36_months(df):
+    # Ensure SALES_DATE is datetime
+    df['SALES_DATE'] = pd.to_datetime(df['SALES_DATE'])
+    
+    # Get today's date and compute last full month
+    today = datetime.today()
+    last_full_month = datetime(today.year, today.month, 1) - relativedelta(months=1)
+    
+    # Calculate 36 months back
+    start_date = last_full_month - relativedelta(months=35)  # 35 + 1 = 36 months
+    
+    # Filter
+    filtered_df = df[(df['SALES_DATE'] >= start_date) & (df['SALES_DATE'] <= last_full_month)]
+    
+    return filtered_df
+
+def prepare_data(df):
+    clean_df = clean_data(df)
+    udf = add_unique_id(clean_df)
+    dft = filter_last_36_months(udf)
+    return dft
+
+def create_static_df(df):
+    # Select relevant static features
+    static_df = df[[
+        'unique_id', 'Selling Division', 'Area', 'Stryker Group Region', 'Region', 'Country',
+        'CatalogNumber', 'Business Sector', 'Business Unit', 'Franchise',
+        'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7'
+    ]].drop_duplicates()
+
+    # Copy for encoding
+    static_df_encoded = static_df.copy()
+
+    # Apply Label Encoding to all categorical/object columns except unique_id
+    for col in static_df_encoded.columns:
+        if static_df_encoded[col].dtype == 'object' and col != 'unique_id':
+            static_df_encoded[col] = LabelEncoder().fit_transform(static_df_encoded[col].astype(str))
+
+    return static_df_encoded
+
+
 def apply_filters(filters):
     """Apply filters to the dataset"""
     global filtered_df, filtered_products, filtered_models
@@ -48,10 +140,99 @@ def toggle_month_view(state):
     by_month = state
     return by_month
 
-def create_models_action():
+def create_models_action(df):
     """Business logic for creating models"""
+    forecast_list = []
+    
+    
+    dft = prepare_data(df)
+
+    franchises = dft['Franchise'].unique()
+
+    for franchise in tqdm(franchises, desc="Processing each Franchise"):
+        df_filt = dft[dft['Franchise'] == franchise].copy()
+
+        # Prepare columns
+        df_fr = df_filt.rename(columns={'SALES_DATE': 'ds', '`Act Orders Rev': 'y'})
+        df_fr['ds'] = pd.to_datetime(df_fr['ds'])
+        df_fr['y'] = df_fr['y'].astype(float)
+        df_fr = df_fr[['unique_id', 'ds', 'y']] 
+
+        # Select static df
+        static_df = create_static_df(df_filt)
+
+        
+
+        # NHITS model setup
+        horizon = 56
+        input_size = 56
+        stacks = 3
+
+        models = [NHITS(
+            h=horizon,
+            input_size=input_size,
+            max_steps=800,
+            stack_types=['identity'] * stacks,
+            n_blocks=[3]*stacks,
+            mlp_units=[[256, 256, 128]] * stacks,
+            n_pool_kernel_size=[2, 4, 6],
+            n_freq_downsample=[2, 4, 6],
+            interpolation_mode='nearest',
+            activation='ReLU',
+            dropout_prob_theta=0.3,
+            scaler_type='robust',
+            loss=MSE(),
+            valid_loss=MSE(),
+            batch_size=64,
+            windows_batch_size=64,
+            random_seed=1,
+            start_padding_enabled=True,
+            learning_rate=1e-3,
+            val_check_steps=100,
+            stat_exog_list=[
+                'Area', 'Stryker Group Region', 'Region', 'Country',
+                'CatalogNumber', 'Business Sector', 'Business Unit',
+                'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7'
+            ]
+        )]
+
+        nf = NeuralForecast(models=models, freq='MS')
+        nf.fit(df=df_fr, static_df=static_df)
+        
+
+
+        # Forecast
+        forecasts = nf.predict()
+        forecasts['Franchise'] = franchise
+        forecast_list.append(forecasts)
+
+        
+
+    # Combine all forecasts
+    final_forecasts = pd.concat(forecast_list).reset_index(drop=True)
+    
+  
+
+    # Define the column order used to construct 'unique_id'
+    unique_id_columns = [
+        "Selling Division","Area","Stryker Group Region","Region","Country","Business Sector",
+        "Business Unit","Franchise","Product Line","IBP Level 5","IBP Level 6",
+        "IBP Level 7","CatalogNumber"]
+
+    # Split 'unique_id' back into individual columns
+    final_forecasts[unique_id_columns] = final_forecasts['unique_id'].str.split(",", expand=True)
+
+
+
+    return final_forecasts
+
+    
     # Actual model creation logic would go here
-    return f"Creating {len(filtered_products)} models"
+    # call data here
+    # rename data
+    # model generation
+    # save model in pkl
+   # return f"Creating {len(filtered_products)} models"
 
 def generate_fc_action():
     """Business logic for generating forecast"""

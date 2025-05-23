@@ -16,6 +16,7 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 def clean_data(df):
+    print(df)
     df=df.to_pandas()
     # Columns to drop
     columns_to_drop = [
@@ -36,19 +37,7 @@ def clean_data(df):
 
 def add_unique_id(df):
     # Create unique_id by concatenating multiple columns
-    df["unique_id"] = df['Selling Division'].astype(str) + "," + \
-                      df['Area'].astype(str) + "," + \
-                      df['Stryker Group Region'].astype(str) + "," + \
-                      df['Region'].astype(str) + "," + \
-                      df['Country'].astype(str) + "," + \
-                      df['Business Sector'].astype(str) + "," + \
-                      df['Business Unit'].astype(str) + "," + \
-                      df['Franchise'].astype(str) + "," + \
-                      df['Product Line'].astype(str) + "," + \
-                      df['IBP Level 5'].astype(str) + "," + \
-                      df['IBP Level 6'].astype(str) + "," + \
-                      df['IBP Level 7'].astype(str) + "," + \
-                      df['CatalogNumber'].astype(str)
+    df["unique_id"] = df['Country'].astype(str) + "," + df['CatalogNumber'].astype(str)
     
     return df
 
@@ -189,15 +178,10 @@ def create_models_action(df):
             start_padding_enabled=True,
             learning_rate=1e-3,
             val_check_steps=100,
-            stat_exog_list=[
-                'Area', 'Stryker Group Region', 'Region', 'Country',
-                'CatalogNumber', 'Business Sector', 'Business Unit',
-                'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7'
-            ]
         )]
 
         nf = NeuralForecast(models=models, freq='MS')
-        nf.fit(df=df_fr, static_df=static_df)
+        nf.fit(df=df_fr)
         
 
 
@@ -206,24 +190,15 @@ def create_models_action(df):
         forecasts['Franchise'] = franchise
         forecast_list.append(forecasts)
 
-        
-
     # Combine all forecasts
     final_forecasts = pd.concat(forecast_list).reset_index(drop=True)
     
-  
-
     # Define the column order used to construct 'unique_id'
-    unique_id_columns = [
-        "Selling Division","Area","Stryker Group Region","Region","Country","Business Sector",
-        "Business Unit","Franchise","Product Line","IBP Level 5","IBP Level 6",
-        "IBP Level 7","CatalogNumber"]
+    unique_id_columns = ["Country","CatalogNumber"]
 
     # Split 'unique_id' back into individual columns
     final_forecasts[unique_id_columns] = final_forecasts['unique_id'].str.split(",", expand=True)
-
-
-
+    print(final_forecasts['unique_id'].unique())
     return final_forecasts
 
     

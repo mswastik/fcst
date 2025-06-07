@@ -10,9 +10,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
 import pandas as pd
 from tqdm import tqdm
-
 from datetime import datetime
-import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 def clean_data(df):
@@ -129,11 +127,11 @@ def toggle_month_view(state):
     by_month = state
     return by_month
 
-def create_models_action(df):
+def create_models_action(df, file_path):
     """Business logic for creating models"""
     forecast_list = []
     
-    
+    # dft = prepare_data(df) # df is already prepared
     dft = prepare_data(df)
 
     franchises = dft['Franchise'].unique()
@@ -183,8 +181,6 @@ def create_models_action(df):
         nf = NeuralForecast(models=models, freq='MS')
         nf.fit(df=df_fr)
         
-
-
         # Forecast
         forecasts = nf.predict()
         forecasts['Franchise'] = franchise
@@ -198,16 +194,39 @@ def create_models_action(df):
 
     # Split 'unique_id' back into individual columns
     final_forecasts[unique_id_columns] = final_forecasts['unique_id'].str.split(",", expand=True)
-    print(final_forecasts['unique_id'].unique())
-    return final_forecasts
+    final_forecasts=final_forecasts.rename(columns={'ds':'SALES_DATE'})
 
-    
-    # Actual model creation logic would go here
-    # call data here
-    # rename data
-    # model generation
-    # save model in pkl
-   # return f"Creating {len(filtered_products)} models"
+    # Convert SALES_DATE to datetime
+    final_forecasts['SALES_DATE'] = pd.to_datetime(final_forecasts['SALES_DATE']).astype("datetime64[us]")
+    final_forecasts['NHITS'] = final_forecasts['NHITS'].astype('float16')
+    ph=pl.read_parquet('data/phierarchy.parquet')
+    try:
+        lh=pl.read_parquet('data/lhierarchy.parquet').drop('Selling Division').unique()
+    except:
+        lh=pl.read_parquet('data/lhierarchy.parquet')
+    final_forecasts=pl.from_pandas(final_forecasts).drop(['Franchise','unique_id'])
+    final_forecasts=final_forecasts.join(ph,on='CatalogNumber',how='left')
+    final_forecasts=final_forecasts.join(lh,on='Country',how='left')
+    print(final_forecasts)
+    # Read the original parquet file
+    original_df_polars = pl.read_parquet(f"data/{file_path}").drop('Selling Division').unique()
+    final_forecasts=final_forecasts.filter(pl.col('Stryker Group Region')==original_df_polars['Stryker Group Region'].unique()[0])
+
+    # Perform the join
+    merged_df_polars = original_df_polars.join(final_forecasts,
+                        on=['SALES_DATE', 'CatalogNumber', 'Country','Area','Stryker Group Region','Region',
+                        'Business Sector','Business Unit','Franchise','Product Line','IBP Level 5','IBP Level 6','IBP Level 7'],
+                                       how='outer',coalesce=True)
+
+    # Save the merged dataframe back to the parquet file
+    merged_df_polars.write_parquet(f"data/{file_path}")
+
+    # Update the global filtered_df in models/data_model.py
+    from models.data_model import filtered_df as global_filtered_df
+    global_filtered_df = merged_df_polars
+
+    #print(final_forecasts)
+    return merged_df_polars # Return the updated dataframe
 
 def generate_fc_action():
     """Business logic for generating forecast"""
@@ -224,7 +243,7 @@ def download_data_action():
     # Actual download implementation would go here
     return f"Downloading data for {len(filtered_df)} records"
 
-def export_data_action():
+def export_data_action(df):
     """Business logic for exporting data"""
     # Actual export implementation would go here
     return f"Exporting data for {len(filtered_df)} records"

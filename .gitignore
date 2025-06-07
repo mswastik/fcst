@@ -1,6 +1,10 @@
 data/*
 ui/__pycache__/*
+__pycache__/*
 models/__pycache__/*
 services/__pycache__/*
 fcst.pbix
 lightning_logs/*
+build/*
+dist/*
+.nicegui/*

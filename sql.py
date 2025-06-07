@@ -7,15 +7,17 @@ from nicegui import run
 
 today=datetime.today()
 path = os.path.expanduser("~")+'/fcst'
-try:
-    os.mkdir(path)
-    past_months=-3
-except:
-    past_months=-12
+#try:
+#    os.mkdir(path)
+#    past_months=-3
+#except:
+#    past_months=-12
 ss="gda-globalsynapseanalytics-ws-prod.sql.azuresynapse.net"
 
-def sqlpd(loc='',reg='',prod='',fn='',nm=6):
+def sqlpd(loc='',reg='',prod='',fn='',pm=6,nm=6):
     print('Starting Query!!!')
+    print(loc,reg,prod,fn)
+    print(type(pm),type(nm))
     query=f'''
     SELECT
         [SellingDivision] as [Selling Division],[COUNTRY_GROUP] 'Area',[StrykerGroupRegion] as [Stryker Group Region],[Region],[Country],p.[CatalogNumber],
@@ -39,7 +41,7 @@ def sqlpd(loc='',reg='',prod='',fn='',nm=6):
     ON s.MDP_Key = m.MDP_Key
 
     WHERE
-        [SALES_DATE] BETWEEN DATEADD(month, {past_months}, GETDATE()) AND DATEADD(month, {nm}, GETDATE()) AND
+        [SALES_DATE] BETWEEN DATEADD(month, {-pm}, GETDATE()) AND DATEADD(month, {nm}, GETDATE()) AND
         [{loc}] in ('{reg}') AND
         --p.Franchise IN ('{fn}')
         --p.Franchise IN ({(','.join('?'*len(fn)))})
@@ -49,21 +51,36 @@ def sqlpd(loc='',reg='',prod='',fn='',nm=6):
         [SellingDivision],[COUNTRY_GROUP],[StrykerGroupRegion],[Region],[Country],p.[Business_Sector],p.[Business_Unit],p.[Franchise],
         p.[IBP_Level_5],p.[IBP_Level_6],p.[IBP_Level_7],p.[Product_Line],[SALES_DATE],p.[CatalogNumber],p.[xx_uom_conversion],p.[PackContent]'''
     connection_string=f"Driver={{ODBC Driver 17 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
-    print(query)
-    reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
-    df1=pl.DataFrame()
-    for batch in reader:
-        df1= pl.concat([df1,pl.from_arrow(batch)])
-    print('Done!!!')
-    df1=df1.with_columns(pl.col('SALES_DATE').cast(pl.Datetime).dt.cast_time_unit('us'))
-    df1.write_csv(f'C:\\Users\\{os.getlogin()}\\Downloads\\temp.csv')
     try:
-        df=pl.read_parquet(f'data/{fn}.parquet')
-        df=df.filter(pl.col('SALES_DATE')<=datetime(today.year,today.month,1)-relativedelta(months=3))
-        df=pl.concat([df,df1])
-        df.write_parquet(f'data/{fn}.parquet')
-    except:
-        df1.write_parquet(f'data/{fn}.parquet')
+        reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
+        df1=pl.DataFrame()
+        for batch in reader:
+            df1= pl.concat([df1,pl.from_arrow(batch)])
+        print('Done!!!')
+        print(df1)
+        df1=df1.with_columns(pl.col('SALES_DATE').cast(pl.Datetime).dt.cast_time_unit('us'))
+        df1.write_csv(f'C:\\Users\\{os.getlogin()}\\Downloads\\temp.csv')
+        try:
+            df=pl.read_parquet(f'data/{fn}.parquet')
+            df=df.filter(pl.col('SALES_DATE')<=datetime(today.year,today.month,1)-relativedelta(months=3))
+            df=pl.concat([df,df1])
+            df.write_parquet(f'data/{fn}.parquet')
+        except:
+            df1.write_parquet(f'data/{fn}.parquet')
+        try:
+            ph=pl.read_parquet(f'data/phierarchy.parquet')
+            ph=pl.concat(ph,df1['Business Sector','Franchise','Business Unit','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','CatalogNumber'].unique())
+            ph.unique().write_parquet(f'data/phierarchy.parquet')
+        except:
+            df['Business Sector','Franchise','Business Unit','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','CatalogNumber'].unique().write_parquet(f'data/phierarchy.parquet')
+        try:
+            lh=pl.read_parquet(f'data/lhierarchy.parquet')
+            lh=pl.concat(lh,df1['Stryker Group Region','Area','Region','Country'].unique())
+            lh.unique().write_parquet(f'data/lhierarchy.parquet')
+        except:
+            df['Stryker Group Region','Area','Region','Country'].unique().write_parquet(f'data/lhierarchy.parquet')
+    except Exception as e:
+        print(f"Arrow ODBC Error: {e}")
     return False
     
 async def phierarchy():
@@ -101,7 +118,7 @@ async def lhierarchy():
     df1=df1.unique()
     df1.write_parquet(f'data//lhierarchy.parquet')
 
-def query_st(loc='',reg='',prod='',fn='',nm=6):
+def query_st(loc='',reg='',prod='',fn='',pm=6,nm=6):
     query=f'''
     SELECT COUNT(1) FROM ( SELECT
         [SellingDivision] as [Selling Division],[COUNTRY_GROUP] 'Area',[StrykerGroupRegion] as [Stryker Group Region],[Region],[Country],p.[CatalogNumber],
@@ -125,7 +142,7 @@ def query_st(loc='',reg='',prod='',fn='',nm=6):
     ON s.MDP_Key = m.MDP_Key
 
     WHERE
-        [SALES_DATE] BETWEEN DATEADD(month, {past_months}, GETDATE()) AND DATEADD(month, {nm}, GETDATE()) AND
+        [SALES_DATE] BETWEEN DATEADD(month, {-pm}, GETDATE()) AND DATEADD(month, {nm}, GETDATE()) AND
         [{loc}] in ('{reg}') AND
         p.[{prod}] IN ('{fn}')
             
@@ -135,6 +152,7 @@ def query_st(loc='',reg='',prod='',fn='',nm=6):
     connection_string=f"Driver={{ODBC Driver 17 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
     reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
     for batch in reader:
-        count= str(batch[0][0])+" rows to download  "
-    print(count)
+        #count= str(batch[0][0])+" rows to download  "
+        count= str(batch[0][0])
+    print(count+" rows to download  ")
     return count

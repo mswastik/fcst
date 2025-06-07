@@ -1,0 +1,77 @@
+/* Basic styling for pivottable elements */
+.pvtUi, .pvtTable {
+    font-family: Arial, sans-serif;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.pvtUi {
+    border: 1px solid #ccc;
+    padding: 10px;
+    background-color: #f9f9f9;
+}
+
+.pvtTable th, .pvtTable td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: right;
+}
+
+.pvtTable th {
+    background-color: #e0e0e0;
+    font-weight: bold;
+    text-align: center;
+}
+
+.pvtAxisLabel {
+    background-color: #f0f0f0;
+    font-weight: bold;
+}
+
+.pvtTotal, .pvtGrandTotal {
+    background-color: #d0d0d0;
+    font-weight: bold;
+}
+
+.pvtRowLabel, .pvtColLabel {
+    background-color: #f0f0f0;
+}
+
+/* Ensure inputs and selects within pivottable are styled */
+.pvtFilterBox, .pvtDropdown, .pvtRenderer, .pvtAggregator, .pvtAttrDropdown, .pvtUiCell  {
+    border: 1px solid #ccc;
+    padding: 5px;
+    border-radius: 3px;
+}
+.pvtVals, .pvtUiCell {
+    background-color: #e6e6e6;
+}
+.ui-sortable-handle {
+    background-color: #d0d0d0;
+    cursor: grab;
+    padding: 5px;
+    margin: 3px;
+    border-radius: 3px;
+}
+.pvtTriangle {
+    cursor: pointer;
+    font-size: 1.2em;
+}
+.pvtFilterBox button {
+    padding: 3px 5px;
+    margin: 3px;
+    border-radius: 3px;
+    background-color: cadetblue;
+}
+.ui-sortable {
+    background-color: #e6e6e6;   
+}
+.ui-sortable li::marker {
+    content: ":: ";
+    font-size: 1em;
+    font-weight: 700;
+}
+.pvtAxisContainer.ui-sortable {
+    width: 20%;
+    max-width: 20% !important;
+}

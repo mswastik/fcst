@@ -85,8 +85,10 @@ def create_dashboard():
 
                 if filter_state['level']:
                     ui.table.from_polars(f1.pivot('SALES_DATE',index=[filter_state['location1'],filter_state['level']],values='`Act Orders Rev',aggregate_function='sum',sort_columns=True),pagination=10).classes('w-full').props('virtual-scroll').on('rowClick', on_row_click_handler)
-                else:
+                elif filter_state['location1']:
                     ui.table.from_polars(f1.pivot('SALES_DATE',index=filter_state['location1'],values='`Act Orders Rev',aggregate_function='sum',sort_columns=True),pagination=10).classes('w-full').props('virtual-scroll').on('rowClick', on_row_click_handler)
+                else:
+                    ui.table.from_polars(f1.pivot('SALES_DATE',index='Region',values='`Act Orders Rev',aggregate_function='sum',sort_columns=True),pagination=10).classes('w-full').props('virtual-scroll').on('rowClick', on_row_click_handler)
                 #ui.table.from_polars(filtered_df,pagination=10)
     
     async def on_filter_change(filter_name, value):
@@ -97,6 +99,7 @@ def create_dashboard():
             #dwn.df=pl.read_parquet(f'data/{value}')
             dwn.df=generate_sample_data(f'data/{value}')
             app.storage.user['dwn_df_json'] = dwn.df.write_json()
+            await update_ui(dwn.df.group_by(['SALES_DATE','Business Unit','Region']).sum())
         if filter_name=='location1':
             location_select2._props.update({'label':value})
             if filter_state.get('product1')!=None:
@@ -215,7 +218,7 @@ def create_dashboard():
                 on_change=lambda e: on_filter_change('level', e.value)
             ).classes('w-40')
             #ui.button('Download Data', on_click=lambda: ui.notify(download_data_action(), type='info')).classes('ml-auto')
-            ui.button('Download Data', on_click=on_download).classes('ml-auto')
+            ui.button('Get Data', on_click=on_download).classes('ml-auto')
         
         # Main content area
         with ui.row().classes('w-full mt-2 ml-0 gap-2'):
@@ -245,22 +248,21 @@ def create_dashboard():
                     line_chart_container = ui.card().classes('w-full h-full')
                 
             # Toggle and export row
-            with ui.row().classes('w-full justify-between items-center mt-2'):
-                with ui.row().classes('items-center gap-2'):
-                    ui.switch(on_change=on_month_toggle)
-                    ui.label('By Month')
+            #with ui.row().classes('w-full justify-between items-center mt-2'):
+                #with ui.row().classes('items-center gap-2'):
+                #    ui.switch(on_change=on_month_toggle)
+                #    ui.label('By Month')
                 
-                with ui.row().classes('gap-2'):
-                    async def run_create_models():
-                        ui.notify('Creating models...', type='info')
-                        dwn.df = await run.cpu_bound(create_models_action, dwn.df, filter_state['data_files'])
-                        await update_ui(dwn.df)
-                        ui.notify('Models created and forecasts saved!', type='success')
-
-                    ui.button('Create Models', on_click=run_create_models).classes('bg-green-100')
-                    ui.button('Generate FC', on_click=lambda: ui.notify(generate_fc_action(), type='info')).classes('bg-green-100')
-                    ui.button('Change FC', on_click=lambda: ui.notify(change_fc_action(), type='info')).classes('bg-green-100')
-                    ui.button('View', on_click=lambda: ui.navigate.to('/raw_data', new_tab=True))
+            with ui.row().classes('gap-2'):
+                async def run_create_models():
+                    ui.notify('Creating models...', type='info')
+                    dwn.df = await run.cpu_bound(create_models_action, dwn.df, filter_state['data_files'])
+                    await update_ui(dwn.df)
+                    ui.notify('Models created and forecasts saved!', type='success')
+                ui.button('Generate Forecast', on_click=run_create_models).classes('bg-green-100')
+                #ui.button('Generate FC', on_click=lambda: ui.notify(generate_fc_action(), type='info')).classes('bg-green-100')
+                ui.button('Change FC', on_click=lambda: ui.notify(change_fc_action(), type='info')).classes('bg-green-100')
+                ui.button('View', on_click=lambda: ui.navigate.to('/raw_data', new_tab=True))
         
         # Bottom details panel
         with ui.card().classes('w-full m-0 p-0 h-full'):
@@ -273,36 +275,7 @@ def create_dashboard():
         on_filter_change('', None)  # Trigger initial filter application
     except:
         pass
-'''
-@ui.page("/raw_data")
-def raw_data_page():
-    from pathlib import Path
-    ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
-    ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.14.1/jquery-ui.min.js" integrity="sha512-MSOo1aY+3pXCOCdGAYoBZ6YGI0aragoQsg1mKKBHXCYPIWxamwOE7Drh+N5CPgGI5SA9IEKJiPjdfqWFWmZtRA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
-    ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/3.0.1/plotly.min.js" integrity="sha512-GvBV4yZL+5zT68skQaXRW80H+S82WupIppDunAVt6pCLVdFmTv9tstetOqXv76L/z9WFl+0zY28QFKu0LAVFSg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
-    ui.add_head_html(f"<script>{(Path(__file__).parent / 'pivot.js').read_text()}</script>") 
-    #ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.js" integrity="sha512-XgJh9jgd6gAHu9PcRBBAp0Hda8Tg87zi09Q2639t0tQpFFQhGpeCgaiEFji36Ozijjx9agZxB0w53edOFGCQ0g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
-    #ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/d3_renderers.min.js" integrity="sha512-qxm3as02fhBV1Z8J8VjE5jQDm/xqF4kuQZRYgK2XeolnGiZFLAXX3XCUp+VdiPv7cX6sv83p6Mht0vXrHMEX+w==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
-    ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/plotly_renderers.min.js" integrity="sha512-nGY6wbyP3gWxAjsZwsjWahe9nKLCTTyTLn1dpwuNHb9CKLjogHAMVIbbr4wNYL0dKOsWTCrlpx9RDY+bB1MFrQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
-    ui.add_head_html('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.14.1/themes/base/jquery-ui.min.css" integrity="sha512-TFee0335YRJoyiqz8hA8KV3P0tXa5CpRBSoM0Wnkn7JoJx1kaq1yXL/rb8YFpWXkMOjRcv5txv+C6UluttluCQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />')
-    ui.add_head_html('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.14.1/themes/base/theme.min.css" integrity="sha512-lfR3NT1DltR5o7HyoeYWngQbo6Ec4ITaZuIw6oAxIiCNYu22U5kpwHy9wAaN0vvBj3U6Uy2NNtAfiaTiaKcDxfhTg==" crossorigin="anonymous" referrerpolicy="no-referrer" />')
-    ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>") 
-    if 'dwn_df_json' in app.storage.user:
-        df_json = app.storage.user['dwn_df_json']
-        df = pl.read_json(io.StringIO(df_json),infer_schema_length=None)
-        if not df.is_empty():
-            ui.label('Raw Data View').classes('text-2xl font-bold')
-            #ui.table.from_polars(df).classes('w-full h-full')
-            ui.add_body_html('<div id="output"></div>')
-            ui.run_javascript(f\\\'''var renderers = $.extend($.pivotUtilities.renderers,$.pivotUtilities.plotly_renderers);
-                              $("#output").pivotUI({df_json},
-                            {{renderers:renderers}});\\\''')
-        else:
-            ui.label('No data available. Please generate or load data from the dashboard.').classes('text-lg text-red-500')
-    else:
-        ui.label('No data available. Please generate or load data from the dashboard.').classes('text-lg text-red-500')
-    ui.button('Back to Dashboard', on_click=lambda: ui.open('/')).classes('mt-4')
-'''
+
 @ui.page("/raw_data")
 def raw_data_page():
      from pathlib import Path

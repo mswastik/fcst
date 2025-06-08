@@ -255,7 +255,7 @@ body {
 
 .pivot-table th,
 .pivot-table td {
-    padding: 12px;
+    padding: 8px;
     text-align: left;
     border-bottom: 1px solid #e9ecef;
     border-right: 1px solid #e9ecef;
@@ -345,8 +345,9 @@ body {
 }
 .grid-view {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 10px;
+    width: 66vw;
 }
 .flex-view {
     display: flex;

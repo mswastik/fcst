@@ -387,7 +387,7 @@ def raw_data_page():
                 </div>
 
                 <div id="metrics-view" class="tab-content" style="width:100%">
-                    <div id="metrics-grid" class="flex-view">
+                    <div id="metrics-grid" class="grid-view">
                         <div class="empty-state">
                             <h3>No Metrics Available</h3>
                             <p>Generate a pivot table first to see key metrics.</p>
@@ -396,6 +396,9 @@ def raw_data_page():
                 </div>
 
                 <div id="raw-view" class="tab-content">
+                    <div class="controls" style="text-align: right; margin-bottom: 10px;">
+                        <button class="btn secondary" onclick="exportRawData()">Export Raw Data</button>
+                    </div>
                     <div class="pivot-table">
                         <div id="raw-data-output">
                             <div class="empty-state">
@@ -1131,59 +1134,136 @@ def raw_data_page():
 
             let html = '';
             
-            valueFields.forEach(vf => {
-                const key = `${vf.field}_${vf.aggregation}`;
-                let totalValue = 0;
-                let count = 0;
-                let min = Infinity;
-                let max = -Infinity;
-                
-                // Calculate overall metrics
-                Object.keys(pivotData.data).forEach(rowKey => {
-                    Object.keys(pivotData.data[rowKey]).forEach(colKey => {
-                        const value = pivotData.data[rowKey][colKey][key];
+            // Group data by SALES_DATE for QoQ calculations (quarterly)
+            const salesDataByQuarter = {};
+            // Group data by SALES_DATE for YoY calculations (yearly)
+            const salesDataByYear = {};
+
+            currentData.forEach(row => {
+                const salesDate = row['SALES_DATE'];
+                if (salesDate) {
+                    const date = new Date(salesDate);
+                    const year = date.getFullYear();
+                    const month = date.getMonth(); // 0-11
+                    const quarter = Math.floor(month / 3) + 1;
+                    const yearQuarter = `${year}-Q${quarter}`;
+                    
+                    // For QoQ
+                    if (!salesDataByQuarter[yearQuarter]) {
+                        salesDataByQuarter[yearQuarter] = {};
+                    }
+                    // For YoY
+                    if (!salesDataByYear[year]) {
+                        salesDataByYear[year] = {};
+                    }
+
+                    valueFields.forEach(vf => {
+                        const field = vf.field;
+                        const value = row[field];
+
+                        // For QoQ
+                        if (!salesDataByQuarter[yearQuarter][field]) {
+                            salesDataByQuarter[yearQuarter][field] = [];
+                        }
                         if (value !== undefined && value !== null && !isNaN(value)) {
-                            totalValue += value;
-                            count++;
-                            min = Math.min(min, value);
-                            max = Math.max(max, value);
+                            salesDataByQuarter[yearQuarter][field].push(value);
+                        }
+
+                        // For YoY
+                        if (!salesDataByYear[year][field]) {
+                            salesDataByYear[year][field] = [];
+                        }
+                        if (value !== undefined && value !== null && !isNaN(value)) {
+                            salesDataByYear[year][field].push(value);
                         }
                     });
-                });
-                
-                const average = count > 0 ? totalValue / count : 0;
-                
-                html += `
-                    <div class="metric-card">
-                        <div class="metric-value">${formatNumber(totalValue)}</div>
-                        <div class="metric-label">Total ${vf.field}</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">${formatNumber(average)}</div>
-                        <div class="metric-label">Average ${vf.field}</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">${formatNumber(max)}</div>
-                        <div class="metric-label">Max ${vf.field}</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">${formatNumber(min)}</div>
-                        <div class="metric-label">Min ${vf.field}</div>
-                    </div>
-                `;
+                }
             });
-            
-            // Add count metrics
-            html += `
-                <div class="metric-card">
-                    <div class="metric-value">${pivotData.rowKeys.length}</div>
-                    <div class="metric-label">Total Rows</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">${currentData.length}</div>
-                    <div class="metric-label">Source Records</div>
-                </div>
-            `;
+
+            const sortedQuarters = Object.keys(salesDataByQuarter).sort();
+            const sortedYears = Object.keys(salesDataByYear).sort();
+
+            valueFields.forEach(vf => {
+                const field = vf.field;
+                
+                // QoQ Table
+                html += `<div class="pivot-table"><table>`;
+                html += `<h3 style="padding-left:20px;font-weight:500;">${field} (${vf.aggregation}) QoQ Growth</h3>`;
+                html += `<tr><th>Quarter</th><th>Value</th><th>QoQ Growth</th></tr>`;
+
+                sortedQuarters.forEach((currentQY, index) => {
+                    const [currentYearStr, currentQuarterStr] = currentQY.split('-Q');
+                    const currentYear = parseInt(currentYearStr);
+                    const currentQuarter = parseInt(currentQuarterStr);
+
+                    const currentValue = salesDataByQuarter[currentQY] && salesDataByQuarter[currentQY][field] ?
+                                         calculateAggregation(salesDataByQuarter[currentQY][field], vf.aggregation) : 0;
+
+                    let qoqGrowth = 'N/A';
+                    if (index > 0) {
+                        let prevQuarterYear = currentYear;
+                        let prevQuarter = currentQuarter - 1;
+                        if (prevQuarter === 0) {
+                            prevQuarter = 4;
+                            prevQuarterYear--;
+                        }
+                        const prevQY = `${prevQuarterYear}-Q${prevQuarter}`;
+                        const prevValue = salesDataByQuarter[prevQY] && salesDataByQuarter[prevQY][field] ?
+                                          calculateAggregation(salesDataByQuarter[prevQY][field], vf.aggregation) : 0;
+                        
+                        if (prevValue !== 0) {
+                            qoqGrowth = (((currentValue - prevValue) / prevValue) * 100).toFixed(2) + '%';
+                        } else if (currentValue !== 0) {
+                            qoqGrowth = 'Inf%';
+                        } else {
+                            qoqGrowth = '0.00%';
+                        }
+                    }
+
+                    html += `
+                        <tr>
+                            <td>${currentQY}</td>
+                            <td class="numeric">${formatNumber(currentValue)}</td>
+                            <td>${qoqGrowth}</td>
+                        </tr>
+                    `;
+                });
+                html += `</table></div>`;
+
+                // YoY Table (Full Calendar Year)
+                html += `<div class="pivot-table"><table>`;
+                html += `<h3 style="padding-left:20px;font-weight:500;">${field} (${vf.aggregation}) YoY Growth (Full Year)</h3>`;
+                html += `<tr><th>Year</th><th>Value</th><th>YoY Growth</th></tr>`;
+
+                sortedYears.forEach((currentYear, index) => {
+                    const currentValue = salesDataByYear[currentYear] && salesDataByYear[currentYear][field] ?
+                                         calculateAggregation(salesDataByYear[currentYear][field], vf.aggregation) : 0;
+
+                    let yoyGrowth = 'N/A';
+                    if (index > 0) {
+                        const prevYear = parseInt(currentYear) - 1;
+                        const prevYearValue = salesDataByYear[prevYear] && salesDataByYear[prevYear][field] ?
+                                              calculateAggregation(salesDataByYear[prevYear][field], vf.aggregation) : 0;
+                        
+                        if (prevYearValue !== 0) {
+                            yoyGrowth = (((currentValue - prevYearValue) / prevYearValue) * 100).toFixed(2) + '%';
+                        } else if (currentValue !== 0) {
+                            yoyGrowth = 'Inf%';
+                        } else {
+                            yoyGrowth = '0.00%';
+                        }
+                    }
+
+                    html += `
+                        <tr>
+                            <td>${currentYear}</td>
+                            <td class="numeric">${formatNumber(currentValue)}</td>
+                            <td>${yoyGrowth}</td>
+                        </tr>
+                    `;
+                });
+                html += `</table></div>`;
+            });
             
             metricsGrid.innerHTML = html;
         }
@@ -1433,6 +1513,41 @@ def raw_data_page():
             a.click();
             window.URL.revokeObjectURL(url);
         }
+        function exportRawData() {
+            if (!currentData || currentData.length === 0) {
+                alert('No raw data available to export.');
+                return;
+            }
+
+            const fields = Object.keys(currentData[0]);
+            let csvContent = '';
+
+            // Header row
+            csvContent += fields.map(field => `"${field}"`).join(',') + '\\n';
+
+            // Data rows
+            currentData.forEach(row => {
+                const rowValues = fields.map(field => {
+                    const value = row[field];
+                    // Handle values that might contain commas or newlines by enclosing them in quotes
+                    if (typeof value === 'string' && (value.includes(',') || value.includes('\\n') || value.includes('"'))) {
+                        return `"${value.replace(/"/g, '""')}"`; // Escape double quotes
+                    }
+                    return value;
+                });
+                csvContent += rowValues.join(',') + '\\n';
+            });
+
+            // Download CSV
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'raw_data.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
         // Function to programmatically load data
         function loadDataProgrammatically(data) {
             if (!Array.isArray(data) || data.length === 0) {

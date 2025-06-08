@@ -76,7 +76,6 @@ def get_chart_data(type,filtered_df):
         return None
     
     chart_data = filtered_df.clone()
-    
     # Group by month if toggle is active
     if by_month:
         chart_data= chart_data.with_columns(group = pl.col('SALES_DATE').dt.strftime('%b')) # Use abbreviated month name for consistency

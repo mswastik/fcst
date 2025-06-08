@@ -1,8 +1,6 @@
 import pandas as pd
 import polars as pl
-from models.data_model import df, filtered_df, filtered_products, filtered_models, by_month
-
-
+from data_model import df, filtered_df, filtered_products, filtered_models, by_month
 from neuralforecast import NeuralForecast
 from neuralforecast.models import NHITS
 from neuralforecast.losses.pytorch import MSE
@@ -23,37 +21,29 @@ def clean_data(df):
         'L0 DF Final Rev', 'L2 Stat Final Rev', '`Fcst DF Final Rev',
         '`Fcst Stat Final Rev', '`Fcst Stat Prelim Rev', 'Fcst DF Final Rev Val'
     ]
-    
     # Drop columns if they exist in the dataframe
     df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
-    
     # Fill NaN values with 0
     df = df.fillna(0)
-    
     return df
 
 
 def add_unique_id(df):
     # Create unique_id by concatenating multiple columns
     df["unique_id"] = df['Country'].astype(str) + "," + df['CatalogNumber'].astype(str)
-    
     return df
 
 
 def filter_last_36_months(df):
     # Ensure SALES_DATE is datetime
     df['SALES_DATE'] = pd.to_datetime(df['SALES_DATE'])
-    
     # Get today's date and compute last full month
     today = datetime.today()
     last_full_month = datetime(today.year, today.month, 1) - relativedelta(months=1)
-    
     # Calculate 36 months back
     start_date = last_full_month - relativedelta(months=35)  # 35 + 1 = 36 months
-    
     # Filter
     filtered_df = df[(df['SALES_DATE'] >= start_date) & (df['SALES_DATE'] <= last_full_month)]
-    
     return filtered_df
 
 def prepare_data(df):
@@ -77,15 +67,13 @@ def create_static_df(df):
     for col in static_df_encoded.columns:
         if static_df_encoded[col].dtype == 'object' and col != 'unique_id':
             static_df_encoded[col] = LabelEncoder().fit_transform(static_df_encoded[col].astype(str))
-
     return static_df_encoded
 
 
 def apply_filters(filters):
     """Apply filters to the dataset"""
     global filtered_df, filtered_products, filtered_models
-    from models.data_model import df, filtered_df, filtered_products, filtered_models
-    
+    from data_model import df, filtered_df, filtered_products, filtered_models
     #mask = pd.Series(True, index=df.index)
     #mask=pl.Series([True])
     
@@ -123,14 +111,13 @@ def apply_filters(filters):
 def toggle_month_view(state):
     """Toggle between normal and month view"""
     global by_month
-    from models.data_model import by_month
+    #from models.data_model import by_month
     by_month = state
     return by_month
 
 def create_models_action(df, file_path):
     """Business logic for creating models"""
     forecast_list = []
-    
     # dft = prepare_data(df) # df is already prepared
     dft = prepare_data(df)
 
@@ -147,8 +134,6 @@ def create_models_action(df, file_path):
 
         # Select static df
         static_df = create_static_df(df_filt)
-
-        
 
         # NHITS model setup
         horizon = 56
@@ -207,7 +192,6 @@ def create_models_action(df, file_path):
     final_forecasts=pl.from_pandas(final_forecasts).drop(['Franchise','unique_id'])
     final_forecasts=final_forecasts.join(ph,on='CatalogNumber',how='left')
     final_forecasts=final_forecasts.join(lh,on='Country',how='left')
-    print(final_forecasts)
     # Read the original parquet file
     original_df_polars = pl.read_parquet(f"data/{file_path}").drop('Selling Division').unique()
     final_forecasts=final_forecasts.filter(pl.col('Stryker Group Region')==original_df_polars['Stryker Group Region'].unique()[0])
@@ -217,12 +201,10 @@ def create_models_action(df, file_path):
                         on=['SALES_DATE', 'CatalogNumber', 'Country','Area','Stryker Group Region','Region',
                         'Business Sector','Business Unit','Franchise','Product Line','IBP Level 5','IBP Level 6','IBP Level 7'],
                                        how='outer',coalesce=True)
-
     # Save the merged dataframe back to the parquet file
     merged_df_polars.write_parquet(f"data/{file_path}")
-
     # Update the global filtered_df in models/data_model.py
-    from models.data_model import filtered_df as global_filtered_df
+    from data_model import filtered_df as global_filtered_df
     global_filtered_df = merged_df_polars
 
     #print(final_forecasts)

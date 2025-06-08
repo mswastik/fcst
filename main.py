@@ -1,6 +1,6 @@
 from nicegui import ui
 from ui.dashboard import create_dashboard
-from models.data_model import initialize_data
+from data_model import initialize_data
 import concurrent.futures
 import sys
 import asyncio

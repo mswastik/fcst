@@ -16,8 +16,6 @@ ss="gda-globalsynapseanalytics-ws-prod.sql.azuresynapse.net"
 
 def sqlpd(loc='',reg='',prod='',fn='',pm=6,nm=6):
     print('Starting Query!!!')
-    print(loc,reg,prod,fn)
-    print(type(pm),type(nm))
     query=f'''
     SELECT
         [SellingDivision] as [Selling Division],[COUNTRY_GROUP] 'Area',[StrykerGroupRegion] as [Stryker Group Region],[Region],[Country],p.[CatalogNumber],

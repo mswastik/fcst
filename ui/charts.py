@@ -1,5 +1,5 @@
 from nicegui import ui
-from models.data_model import get_chart_data
+from data_model import get_chart_data
 #import polars as pl
 
 def render_column_chart(container,filtered_df):

@@ -1,6 +1,6 @@
 from nicegui import ui,run,app
-from models.data_model import get_filter_options, filtered_products, filtered_models, generate_sample_data, filtered_df
-from services.data_service import (
+from data_model import get_filter_options, filtered_products, filtered_models, generate_sample_data, filtered_df
+from data_service import (
     apply_filters, toggle_month_view, create_models_action, 
     generate_fc_action, change_fc_action, download_data_action, export_data_action
 )
@@ -79,7 +79,7 @@ def create_dashboard():
                     # Apply filters and update UI
                     # apply_filters updates the global filtered_df in models.data_model
                     apply_filters(filter_state) 
-                    from models.data_model import filtered_df as global_filtered_df
+                    from data_model import filtered_df as global_filtered_df
                     await update_ui(global_filtered_df)
                     ui.notify(f"Filtered by CatalogNumber: {catalog_number}", type='info')
 

@@ -45,7 +45,7 @@ def generate_sample_data(path):
         })'''
     #df= pl.read_parquet('data//APAC.parquet')
     df= pl.read_parquet(path)
-    df=df.with_columns(pl.col('`Act Orders Rev','`Fcst Stat Prelim Rev','L2 Stat Final Rev','Fcst DF Final Rev','L2 DF Final Rev').cast(pl.Float32))
+    df=df.with_columns(pl.col('`Act Orders Rev','`Fcst Stat Prelim Rev','`Fcst Stat Final Rev','L2 Stat Final Rev','`Fcst DF Final Rev','L2 DF Final Rev').cast(pl.Float32))
     filtered_df = df.clone()
     return df
 #df= pl.read_parquet('data//APAC.parquet')

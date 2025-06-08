@@ -314,42 +314,53 @@ def raw_data_page():
     <div class="container">
         <div class="main-content">
             <div class="sidebar">
-            <div class="field-group">
-                <h3>Available Fields</h3>
-                <div class="field-list" data-zone="fields" id="available-fields"></div>
-            </div>
+                <div class="field-group">
+                    <h4>Available Fields</h4>
+                    <div class="field-list" data-zone="fields" id="available-fields"></div>
+                </div>
             </div>
             <div class="sidebar">
                 <div class="field-group">
-                    <h3>Rows</h3>
+                    <h4>Rows</h4>
                     <div class="field-list" data-zone="rows" id="row-fields"></div>
                 </div>
                 <div class="field-group">
-                    <h3>Columns</h3>
+                    <h4>Columns</h4>
                     <div class="field-list" data-zone="columns" id="column-fields"></div>
                 </div>
 
                 <div class="field-group">
-                    <h3>Values</h3>
+                    <h4>Values</h4>
                     <div class="field-list" data-zone="values" id="value-fields"></div>
+                </div>
+                <div class="field-group">
+                    <h4>Filters</h4>
+                    <div class="filter-controls">
+                        <select id="filter-field" class="filter-select"><div class="seldrop"></div></select>
+                      <div style="display:grid;grid-template-columns: 1fr 1fr;gap: 4px;">
+                        <button class="btn small" onclick="applyFilter()">Apply Filter</button>
+                        <button class="btn small danger" onclick="clearFilters()">Clear Filters</button>
+                      </div>
+                    </div>
+                    <div id="active-filters" class="active-filters"></div>
                 </div>
             </div>
             
             <div class="content-area">
-                <div class="controls">
+                <!-- <div class="controls">
                     <button class="btn" onclick="generatePivot()">Generate Analysis</button>
                     <button class="btn danger" onclick="clearAll()">Clear All</button>
                     <button class="btn secondary" onclick="exportData()">Export Results</button>
-                </div>
+                </div> -->
 
                 <div class="view-tabs">
-                    <button class="tab active" onclick="switchTab('table')">Table View</button>
-                    <button class="tab" onclick="switchTab('chart')">Charts</button>
+                    <button class="tab" onclick="switchTab('table')">Table View</button>
+                    <button class="tab active" onclick="switchTab('chart')">Charts</button>
                     <button class="tab" onclick="switchTab('metrics')">Key Metrics</button>
                     <button class="tab" onclick="switchTab('raw')">Raw Data</button>
                 </div>
 
-                <div id="table-view" class="tab-content active">
+                <div id="table-view" class="tab-content">
                     <div id="pivot-output">
                         <div class="empty-state">
                             <h3>No Pivot Table Generated</h3>
@@ -358,25 +369,25 @@ def raw_data_page():
                     </div>
                 </div>
 
-                <div id="chart-view" class="tab-content">
+                <div id="chart-view" class="tab-content active">
                     <div class="chart-controls">
                         <select class="chart-select" id="chart-type" onchange="updateChart()">
+                            <option value="line">Line Chart</option>      
                             <option value="bar">Bar Chart</option>
-                            <option value="line">Line Chart</option>
                             <option value="pie">Pie Chart</option>
                             <option value="doughnut">Doughnut Chart</option>
                             <option value="radar">Radar Chart</option>
                             <option value="polarArea">Polar Area</option>
                         </select>
-                        <button class="btn" onclick="updateChart()">Update Chart</button>
+                        <!-- <button class="btn" onclick="updateChart()">Update Chart</button> -->
                     </div>
                     <div class="chart-container">
                         <canvas id="pivotChart" width="400" height="200"></canvas>
                     </div>
                 </div>
 
-                <div id="metrics-view" class="tab-content">
-                    <div id="metrics-grid" class="grid-view">
+                <div id="metrics-view" class="tab-content" style="width:100%">
+                    <div id="metrics-grid" class="flex-view">
                         <div class="empty-state">
                             <h3>No Metrics Available</h3>
                             <p>Generate a pivot table first to see key metrics.</p>
@@ -399,10 +410,220 @@ def raw_data_page():
     </div>
 
     <script>
+    function convertMultiSelectToAutocomplete() {
+            // Find all select elements with multiple attribute
+            const multiSelects = document.querySelectorAll('select[multiple]');
+            
+            multiSelects.forEach(select => {
+                // Skip if already converted
+                if (select.classList.contains('converted')) return;
+                
+                // Mark as converted
+                select.classList.add('converted');
+                
+                // Get original options
+                const options = Array.from(select.options).map(opt => ({
+                    value: opt.value,
+                    text: opt.textContent,
+                    selected: opt.selected
+                }));
+                
+                // Create custom multiselect container
+                const container = document.createElement('div');
+                container.className = 'custom-multiselect';
+                
+                const multiselectContainer = document.createElement('div');
+                multiselectContainer.className = 'multiselect-container';
+                multiselectContainer.tabIndex = 0;
+                
+                const selectedItems = document.createElement('div');
+                selectedItems.className = 'selected-items';
+                
+                const searchInput = document.createElement('input');
+                searchInput.type = 'text';
+                searchInput.className = 'search-input';
+                searchInput.placeholder = 'Type to search...';
+                
+                const arrow = document.createElement('div');
+                arrow.className = 'dropdown-arrow';
+                
+                const dropdown = document.createElement('div');
+                dropdown.className = 'options-dropdown';
+                
+                // Assemble structure
+                selectedItems.appendChild(searchInput);
+                multiselectContainer.appendChild(selectedItems);
+                multiselectContainer.appendChild(arrow);
+                container.appendChild(multiselectContainer);
+                container.appendChild(dropdown);
+                
+                // Insert after original select and hide original
+                select.parentNode.insertBefore(container, select.nextSibling);
+                select.style.display = 'none';
+                
+                let selectedValues = new Set(options.filter(opt => opt.selected).map(opt => opt.value));
+                let isOpen = false;
+                
+                function updateSelectedDisplay() {
+                    // Clear current display except search input
+                    const tags = selectedItems.querySelectorAll('.selected-tag');
+                    tags.forEach(tag => tag.remove());
+                    
+                    // Add selected items as tags
+                    selectedValues.forEach(value => {
+                        const option = options.find(opt => opt.value === value);
+                        if (option) {
+                            const tag = document.createElement('div');
+                            tag.className = 'selected-tag';
+                            tag.innerHTML = `
+                                ${option.text}
+                                <span class="tag-remove" data-value="${value}">×</span>
+                            `;
+                            selectedItems.insertBefore(tag, searchInput);
+                        }
+                    });
+                    
+                    // Update original select
+                    Array.from(select.options).forEach(opt => {
+                        opt.selected = selectedValues.has(opt.value);
+                    });
+                    
+                    // Show placeholder if no selections
+                    if (selectedValues.size === 0) {
+                        searchInput.placeholder = 'Type to search...';
+                    } else {
+                        searchInput.placeholder = '';
+                    }
+                } // Closing brace for updateSelectedDisplay
+                
+                function filterOptions(searchTerm = '') {
+                    dropdown.innerHTML = '';
+                    
+                    const filteredOptions = options.filter(opt =>
+                        opt.text.toLowerCase().includes(searchTerm.toLowerCase())
+                    );
+                    
+                    if (filteredOptions.length === 0) {
+                        const noOptions = document.createElement('div');
+                        noOptions.className = 'no-options';
+                        noOptions.textContent = 'No options found';
+                        dropdown.appendChild(noOptions);
+                        return;
+                    }
+                    
+                    filteredOptions.forEach(option => {
+                        const item = document.createElement('div');
+                        item.className = 'option-item';
+                        if (selectedValues.has(option.value)) {
+                            item.classList.add('selected');
+                        }
+                        
+                        item.innerHTML = `
+                            <input type="checkbox" class="option-checkbox" ${selectedValues.has(option.value) ? 'checked' : ''}>
+                            <span>${option.text}</span>
+                        `;
+                        
+                        item.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            const checkbox = item.querySelector('.option-checkbox');
+                            
+                            if (selectedValues.has(option.value)) {
+                                selectedValues.delete(option.value);
+                                checkbox.checked = false;
+                                item.classList.remove('selected');
+                            } else {
+                                selectedValues.add(option.value);
+                                checkbox.checked = true;
+                                item.classList.add('selected');
+                            }
+                            
+                            updateSelectedDisplay();
+                        });
+                        
+                        dropdown.appendChild(item);
+                    });
+                }
+                
+                function openDropdown() {
+                    if (!isOpen) {
+                        isOpen = true;
+                        dropdown.classList.add('open');
+                        arrow.classList.add('open');
+                        filterOptions(searchInput.value);
+                        searchInput.focus();
+                    }
+                }
+                
+                function closeDropdown() {
+                    if (isOpen) {
+                        isOpen = false;
+                        dropdown.classList.remove('open');
+                        arrow.classList.remove('open');
+                        searchInput.value = '';
+                    }
+                }
+                
+                // Event listeners
+                multiselectContainer.addEventListener('click', (e) => {
+                    if (e.target === searchInput) return;
+                    openDropdown();
+                });
+                multiselectContainer.addEventListener('change', (e) => {
+                        applyFilter();
+                    });
+                
+                searchInput.addEventListener('input', (e) => {
+                    if (!isOpen) openDropdown();
+                    filterOptions(e.target.value);
+                });
+                
+                searchInput.addEventListener('focus', openDropdown);
+                
+                // Remove tag functionality
+                selectedItems.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('tag-remove')) {
+                        const value = e.target.dataset.value;
+                        selectedValues.delete(value);
+                        updateSelectedDisplay();
+                        
+                        // Update dropdown if open
+                        if (isOpen) {
+                            filterOptions(searchInput.value);
+                        }
+                    }
+                });
+                
+                // Close dropdown when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!container.contains(e.target)) {
+                        closeDropdown();
+                    }
+                });
+                
+                // Keyboard navigation
+                multiselectContainer.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (!isOpen) {
+                            openDropdown();
+                        }
+                    } else if (e.key === 'Escape') {
+                        closeDropdown();
+                    }
+                });
+                
+                // Initialize display
+                updateSelectedDisplay();
+                filterOptions();
+                // The selectElement.setAttribute('onchange', 'applyFilter()'); was moved inside updateSelectedDisplay
+            }); // Closing brace for multiSelects.forEach
+        }; // Closing brace for convertMultiSelectToAutocomplete
+        let originalData = null;
         let currentData = null;
         let currentPivotData = null;
         let currentChart = null;
         let draggedElement = null;
+        let activeFilters = [];
 
         // Data input functions
         function toggleDataInput() {
@@ -430,6 +651,147 @@ def raw_data_page():
                 fieldItem.addEventListener('dragend', handleDragEnd);
                 availableFields.appendChild(fieldItem);
             });
+            populateFilterFields();
+        }
+
+        function populateFilterFields() {
+            const filterFieldSelect = document.getElementById('filter-field');
+            filterFieldSelect.innerHTML = '<option value="">Select Field</option>';
+            const allowedFields = ['StrykerGroupRegion', 'Area', 'Region', 'Country', 'Business Sector', 'Business Unit', 'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7','CatalogNumber'];
+            
+            allowedFields.forEach(field => {
+                const option = document.createElement('option');
+                option.value = field;
+                option.textContent = field;
+                filterFieldSelect.appendChild(option);
+            });
+            filterFieldSelect.onchange = updateFilterValueInput;
+        }
+
+        function updateFilterValueInput() {
+            const filterField = document.getElementById('filter-field').value;
+            const filterValueContainer = document.querySelector('.filter-controls'); // Get the filter controls div
+            let filterValueElement = document.getElementById('filter-value');
+
+            // Remove existing filter value input/select
+            if (filterValueElement) {
+                filterValueElement.remove();
+            }
+
+            if (!filterField) {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.id = 'filter-value';
+                input.placeholder = 'Filter value';
+                input.className = 'filter-input';
+                filterValueContainer.insertBefore(input, filterValueContainer.children[2]); // Insert before apply button
+                return;
+            }
+
+            const selectElement = document.createElement('select');
+            selectElement.id = 'filter-value';
+            selectElement.setAttribute('multiple', 'true');
+            selectElement.className = 'filter-select';
+            selectElement.innerHTML = '<option value="">Select Value(s)</option>';
+
+            const uniqueValues = getUniqueValues(filterField);
+            uniqueValues.forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                selectElement.appendChild(option);
+            });
+            filterValueContainer.insertBefore(selectElement, filterValueContainer.children[1]);
+            convertMultiSelectToAutocomplete();
+        }
+
+        function getUniqueValues(field) {
+            const values = new Set();
+            originalData.forEach(row => {
+                if (row[field] !== undefined && row[field] !== null) {
+                    values.add(String(row[field]));
+                }
+            });
+            return Array.from(values).sort();
+        }
+        function clearFilters() {
+            activeFilters = [];
+            filterData();
+            document.querySelectorAll('.custom-multiselect').forEach(element => {
+                element.remove();
+            });
+            renderActiveFilters();
+        }
+
+        function applyFilter() {
+            clearFilters()
+            const field = document.getElementById('filter-field').value;
+            const filterValueElement = document.getElementById('filter-value');
+            let values = [];
+
+            if (filterValueElement.tagName === 'SELECT' && filterValueElement.multiple) {
+                values = Array.from(filterValueElement.selectedOptions).map(option => option.value);
+            } else {
+                values = [filterValueElement.value];
+            }
+
+            if (!field || values.length === 0 || (values.length === 1 && values[0] === '')) {
+                alert('Please select a field and enter/select a value(s) to filter.');
+                return;
+            }
+
+            activeFilters.push({ field, values });
+            filterData();
+            renderActiveFilters();
+            // Reset filter value input/select
+            if (filterValueElement.tagName === 'INPUT') {
+                filterValueElement.value = '';
+            } else {
+                filterValueElement.value = ''; // Reset select to default option
+            }
+        }
+
+        function filterData() {
+            let filtered = [...originalData];
+            activeFilters.forEach(filter => {
+                filtered = filtered.filter(row => {
+                    const rowValue = String(row[filter.field]).toLowerCase();
+                    // If filter.values is an array, check if rowValue is included in the array
+                    // Otherwise, use the old includes logic for single string values
+                    if (Array.isArray(filter.values)) {
+                        return filter.values.some(val => rowValue.includes(String(val).toLowerCase()));
+                    } else {
+                        return rowValue.includes(String(filter.values).toLowerCase());
+                    }
+                });
+            });
+            currentData = filtered;
+            updateRawDataView();
+            generatePivot(); // Re-generate pivot with filtered data
+        }
+
+        function renderActiveFilters() {
+            const activeFiltersDiv = document.getElementById('active-filters');
+            activeFiltersDiv.innerHTML = '';
+            if (activeFilters.length === 0) {
+                activeFiltersDiv.innerHTML = '<p>No active filters.</p>';
+                return;
+            }
+            activeFilters.forEach((filter, index) => {
+                const filterTag = document.createElement('span');
+                filterTag.className = 'filter-tag';
+                const displayValue = Array.isArray(filter.values) ? filter.values.join(', ') : filter.values;
+                filterTag.innerHTML = `${filter.field}: "${displayValue}" <span class="remove-filter" data-index="${index}">&times;</span>`;
+                filterTag.querySelector('.remove-filter').addEventListener('click', removeFilter);
+                activeFiltersDiv.appendChild(filterTag);
+            });
+        }
+
+        function removeFilter(event) {
+            const index = parseInt(event.target.getAttribute('data-index'));
+            activeFilters.splice(index, 1);
+            filterData();
+            renderActiveFilters();
         }
 
         function updateRawDataView() {
@@ -547,6 +909,7 @@ def raw_data_page():
                 }
                 
                 draggedElement = null;
+                generatePivot(); // Trigger pivot table generation after drop
             }
         }
 
@@ -562,6 +925,7 @@ def raw_data_page():
             newField.addEventListener('dragend', handleDragEnd);
             
             targetZone.appendChild(newField);
+            generatePivot(); // Trigger pivot table generation after adding field
         }
 
         function addFieldToValues(fieldName, targetZone) {
@@ -575,7 +939,7 @@ def raw_data_page():
             select.className = 'aggregation-select';
             select.innerHTML = `
                 <option value="sum">Sum</option>
-                <option value="avg">Average</option>
+                <option value="avg">Mean</option>
                 <option value="count">Count</option>
                 <option value="min">Min</option>
                 <option value="max">Max</option>
@@ -587,19 +951,16 @@ def raw_data_page():
             // Add event listeners
             newField.addEventListener('dragstart', handleDragStart);
             newField.addEventListener('dragend', handleDragEnd);
+            select.addEventListener('change', generatePivot); // Add this line
             
             targetZone.appendChild(newField);
+            generatePivot(); // Trigger pivot table generation after adding value field
         }
 
         function generatePivot() {
             const rowFields = getFieldsFromZone('rows');
             const columnFields = getFieldsFromZone('columns');
             const valueFields = getFieldsFromZone('values');
-
-            if (valueFields.length === 0) {
-                alert('Please add at least one field to Values to generate analysis.');
-                return;
-            }
 
             currentPivotData = createPivotTable(currentData, rowFields, columnFields, valueFields);
             renderPivotTable(currentPivotData, rowFields, columnFields, valueFields);
@@ -614,6 +975,7 @@ def raw_data_page():
         function getFieldsFromZone(zone) {
             const zoneElement = document.getElementById(`${zone === 'rows' ? 'row' : zone === 'columns' ? 'column' : 'value'}-fields`);
             const fields = [];
+            console.log(zoneElement)
             
             zoneElement.querySelectorAll('.field-item').forEach(item => {
                 const field = item.getAttribute('data-field');
@@ -846,6 +1208,10 @@ def raw_data_page():
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
                     plugins: {
                         title: {
                             display: true,
@@ -873,7 +1239,8 @@ def raw_data_page():
             const valueFields = getFieldsFromZone('values');
             
             // Use column values for x-axis labels
-            const labels = columnFields.length > 0 ? currentPivotData.columnValues : currentPivotData.rowKeys;
+            // const labels = columnFields.length > 0 ? currentPivotData.columnValues : currentPivotData.rowKeys;
+            const labels = currentPivotData.rowKeys;
             const datasets = [];
             
             if (columnFields.length === 0) {
@@ -892,21 +1259,20 @@ def raw_data_page():
                         borderWidth: 2
                     });
                 });
-            } else {
-                // Complex case: columns on x-axis, rows as datasets
-                currentPivotData.rowKeys.forEach((rowKey, rowIndex) => {
-                    console.log(rowKey,rowIndex)
-                    valueFields.forEach(vf => {
+              } else {
+                // If column fields are present, each combination of column value and value field becomes a dataset
+                currentPivotData.columnValues.forEach((colValue, colIndex) => {
+                    valueFields.forEach((vf, valIndex) => {
                         const key = `${vf.field}_${vf.aggregation}`;
-                        const data = currentPivotData.columnValues.map(colValue => {
+                        const data = currentPivotData.rowKeys.map(rowKey => {
                             return currentPivotData.data[rowKey]?.[colValue]?.[key] || 0;
                         });
                         
                         datasets.push({
-                            label: `${rowKey} - ${vf.field} (${vf.aggregation})`,
+                            label: `${colValue} - ${vf.field} (${vf.aggregation})`,
                             data: data,
-                            backgroundColor: generateColors(currentPivotData.rowKeys.length, rowIndex, 0.7),
-                            borderColor: generateColors(currentPivotData.rowKeys.length, rowIndex, 1),
+                            backgroundColor: generateColors(currentPivotData.columnValues.length * valueFields.length, colIndex * valueFields.length + valIndex, 0.7),
+                            borderColor: generateColors(currentPivotData.columnValues.length * valueFields.length, colIndex * valueFields.length + valIndex, 1),
                             borderWidth: 2
                         });
                     });
@@ -996,16 +1362,8 @@ def raw_data_page():
                 currentChart.destroy();
                 currentChart = null;
             }
-            
             currentPivotData = null;
-        }
-
-        function loadSampleData() {
-            currentData = [...sampleData];
-            updateAvailableFields();
-            updateRawDataView();
-            clearAll();
-            alert('Sample data loaded successfully!');
+            generatePivot(); // Trigger pivot table generation after clearing all
         }
 
         function exportData() {
@@ -1081,13 +1439,26 @@ def raw_data_page():
                 alert('Invalid data provided. Please provide an array of objects.');
                 return;
             }
-            currentData = data;
+            originalData = data; // Store original data
+            currentData = [...originalData]; // Initialize currentData with original
             updateAvailableFields();
             updateRawDataView();
             clearAll(); // Clear existing pivot/charts
+            clearFilters(); // Clear any active filters
             //alert('Data loaded programmatically!');
             // Optionally, generate pivot table immediately after loading data
-            // generatePivot(); 
+            
+            // Set default columns
+            const rowFieldsContainer = document.getElementById('row-fields');
+            addFieldToZone('SALES_DATE', rowFieldsContainer);
+
+            // Set default values
+            const valueFieldsContainer = document.getElementById('value-fields');
+            addFieldToValues('`Act Orders Rev', valueFieldsContainer);
+            addFieldToValues('NHITS', valueFieldsContainer);
+            addFieldToValues('`Fcst Stat Final Rev', valueFieldsContainer);
+
+            generatePivot(); // Generate pivot table with default values
         }
 
         // Expose the function globally for external calls (e.g., from parent window or other scripts)
@@ -1099,5 +1470,7 @@ def raw_data_page():
             initializeDragAndDrop();
             updateRawDataView();
         });
+
+        convertMultiSelectToAutocomplete();
     </script></body>                  
     ''')

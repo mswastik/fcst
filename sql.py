@@ -70,13 +70,13 @@ def sqlpd(loc='',reg='',prod='',fn='',pm=6,nm=6):
             ph=pl.concat(ph,df1['Business Sector','Franchise','Business Unit','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','CatalogNumber'].unique())
             ph.unique().write_parquet(f'data/phierarchy.parquet')
         except:
-            df['Business Sector','Franchise','Business Unit','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','CatalogNumber'].unique().write_parquet(f'data/phierarchy.parquet')
+            df1['Business Sector','Franchise','Business Unit','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','CatalogNumber'].unique().write_parquet(f'data/phierarchy.parquet')
         try:
             lh=pl.read_parquet(f'data/lhierarchy.parquet')
             lh=pl.concat(lh,df1['Stryker Group Region','Area','Region','Country'].unique())
             lh.unique().write_parquet(f'data/lhierarchy.parquet')
         except:
-            df['Stryker Group Region','Area','Region','Country'].unique().write_parquet(f'data/lhierarchy.parquet')
+            df1['Stryker Group Region','Area','Region','Country'].unique().write_parquet(f'data/lhierarchy.parquet')
     except Exception as e:
         print(f"Arrow ODBC Error: {e}")
     return False

@@ -155,7 +155,7 @@ def create_dashboard():
                 lh=ui.select(options=['StrykerGroupRegion','Region','Country'],label='Location').bind_value(dwn,'lhv').classes('w-48')
                 lv=ui.input(label='Location Values',placeholder='Enter comma seperated values').bind_value(dwn,'lvv').classes('w-80')
             with ui.row():
-                ph=ui.select(options=['Franchise','Business_Unit','IBP_Level_5','CatalogNumer'],label='Product').bind_value(dwn,'phv').classes('w-48')
+                ph=ui.select(options=['Franchise','Business_Unit','IBP_Level_5','CatalogNumber'],label='Product').bind_value(dwn,'phv').classes('w-48')
                 pv=ui.input(label='Product Values',placeholder='Enter comma seperated values').bind_value(dwn,'pvv').classes('w-80')
             with ui.row():
                 pm=ui.number(label='Past Months').bind_value(dwn,'pmv')
@@ -246,19 +246,14 @@ def create_dashboard():
                 # Line chart
                 with ui.column().classes('w-[590px] h-96 gap-0'):
                     line_chart_container = ui.card().classes('w-full h-full')
-                
-            # Toggle and export row
-            #with ui.row().classes('w-full justify-between items-center mt-2'):
-                #with ui.row().classes('items-center gap-2'):
-                #    ui.switch(on_change=on_month_toggle)
-                #    ui.label('By Month')
-                
+
+            async def run_create_models():
+                ui.notify('Creating models...', type='info')
+                dwn.df = await run.cpu_bound(create_models_action, dwn.df, filter_state['data_files'])
+                await update_ui(dwn.df)
+                ui.notify('Models created and forecasts saved!', type='success')
+
             with ui.row().classes('gap-2'):
-                async def run_create_models():
-                    ui.notify('Creating models...', type='info')
-                    dwn.df = await run.cpu_bound(create_models_action, dwn.df, filter_state['data_files'])
-                    await update_ui(dwn.df)
-                    ui.notify('Models created and forecasts saved!', type='success')
                 ui.button('Generate Forecast', on_click=run_create_models).classes('bg-green-100')
                 #ui.button('Generate FC', on_click=lambda: ui.notify(generate_fc_action(), type='info')).classes('bg-green-100')
                 ui.button('Change FC', on_click=lambda: ui.notify(change_fc_action(), type='info')).classes('bg-green-100')

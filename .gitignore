@@ -7,4 +7,9 @@ fcst.pbix
 lightning_logs/*
 build/*
 dist/*
+dist1/*
+dist2/*
 .nicegui/*
+gguf/*
+data1/*
+packages/*

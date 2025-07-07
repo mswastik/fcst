@@ -4,6 +4,9 @@ from dateutil.relativedelta import relativedelta
 import polars as pl
 import os
 from nicegui import run
+import pyodbc
+drivers =sorted(pyodbc.drivers())
+d=[i for i in drivers if i.find('ODBC Driver')!=-1]
 
 today=datetime.today()
 path = os.path.expanduser("~")+'/fcst'
@@ -48,7 +51,7 @@ def sqlpd(loc='',reg='',prod='',fn='',pm=6,nm=6):
     GROUP BY
         [SellingDivision],[COUNTRY_GROUP],[StrykerGroupRegion],[Region],[Country],p.[Business_Sector],p.[Business_Unit],p.[Franchise],
         p.[IBP_Level_5],p.[IBP_Level_6],p.[IBP_Level_7],p.[Product_Line],[SALES_DATE],p.[CatalogNumber],p.[xx_uom_conversion],p.[PackContent]'''
-    connection_string=f"Driver={{ODBC Driver 17 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
+    connection_string=f"Driver={{{d[-1]}}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
     try:
         reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
         df1=pl.DataFrame()
@@ -89,7 +92,7 @@ async def phierarchy():
 
     FROM [Envision].[DIM_Demantra_CLD_demantraproducts] p
  '''
-    connection_string=f"Driver={{ODBC Driver 17 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
+    connection_string=f"Driver={{{d[-1]}}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
     reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
     df1=pl.DataFrame()
     print('Querying!!!')
@@ -106,7 +109,7 @@ async def lhierarchy():
             
     FROM [Envision].[DIM_Demantra_CLD_DemantraLocation] l
  '''
-    connection_string=f"Driver={{ODBC Driver 17 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
+    connection_string=f"Driver={{{d[-1]}}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
     reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
     df1=pl.DataFrame()
     print('Querying!!!')
@@ -147,7 +150,7 @@ def query_st(loc='',reg='',prod='',fn='',pm=6,nm=6):
     GROUP BY
         [SellingDivision],[COUNTRY_GROUP],[StrykerGroupRegion],[Region],[Country],p.[Business_Sector],p.[Business_Unit],p.[Franchise],
         p.[IBP_Level_5],p.[IBP_Level_6],p.[IBP_Level_7],p.[Product_Line],[SALES_DATE],p.[CatalogNumber],p.[xx_uom_conversion],p.[PackContent]) AS subquery'''
-    connection_string=f"Driver={{ODBC Driver 17 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
+    connection_string=f"Driver={{{d[-1]}}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
     reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
     for batch in reader:
         #count= str(batch[0][0])+" rows to download  "

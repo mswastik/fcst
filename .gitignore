@@ -13,3 +13,6 @@ dist2/*
 gguf/*
 data1/*
 packages/*
+archive/mlruns/*
+archive/checkpoints/*
+archive/lightning_logs/*

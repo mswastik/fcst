@@ -2,7 +2,7 @@ from nicegui import ui,run,app
 from data_model import get_filter_options, filtered_products, filtered_models, generate_sample_data, filtered_df
 from data_service import (
     apply_filters, toggle_month_view, create_models_action, 
-    generate_fc_action, change_fc_action, download_data_action, export_data_action
+    generate_fc_action, change_fc_action, download_data_action, export_data_action, create_clusters
 )
 from sql import sqlpd,query_st
 from ui.charts import update_charts
@@ -252,8 +252,15 @@ def create_dashboard():
                 dwn.df = await run.cpu_bound(create_models_action, dwn.df, filter_state['data_files'])
                 await update_ui(dwn.df)
                 ui.notify('Models created and forecasts saved!', type='success')
+            
+            async def run_cluster():
+                ui.notify('Creating clusters...', type='info')
+                dwn.df = await run.cpu_bound(create_clusters, dwn.df, filter_state['data_files'])
+                await update_ui(dwn.df)
+                ui.notify('Clusters created!', type='success')
 
             with ui.row().classes('gap-2'):
+                ui.button('Segmentation', on_click=run_cluster).classes('bg-green-100')
                 ui.button('Generate Forecast', on_click=run_create_models).classes('bg-green-100')
                 #ui.button('Generate FC', on_click=lambda: ui.notify(generate_fc_action(), type='info')).classes('bg-green-100')
                 ui.button('Change FC', on_click=lambda: ui.notify(change_fc_action(), type='info')).classes('bg-green-100')
@@ -277,7 +284,7 @@ def raw_data_page():
      if 'dwn_df_json' in app.storage.user:
         df_json = app.storage.user['dwn_df_json']
      ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>')
-     ui.add_head_html(f"<style>{(Path(__file__).parent / 'style1.css').read_text()}</style>") 
+     ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>") 
      ui.add_body_html('''<body>
     <div class="container">
         <div class="main-content">
@@ -628,7 +635,7 @@ def raw_data_page():
         function populateFilterFields() {
             const filterFieldSelect = document.getElementById('filter-field');
             filterFieldSelect.innerHTML = '<option value="">Select Field</option>';
-            const allowedFields = ['StrykerGroupRegion', 'Area', 'Region', 'Country', 'Business Sector', 'Business Unit', 'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7','CatalogNumber'];
+            const allowedFields = ['StrykerGroupRegion', 'Area', 'Region', 'Country', 'Business Sector', 'Business Unit', 'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7','CatalogNumber','birch'];
             
             allowedFields.forEach(field => {
                 const option = document.createElement('option');

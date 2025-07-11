@@ -115,6 +115,21 @@ def toggle_month_view(state):
     by_month = state
     return by_month
 
+def create_clusters(df, file_path):
+    from sklearn.cluster import Birch
+    if 'unique_id' not in df.columns:
+        df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
+    df1 = df[['unique_id', 'SALES_DATE', '`Act Orders Rev']]
+    df1 = df1.with_columns(ynorm=((pl.col('`Act Orders Rev')-pl.col('`Act Orders Rev').mean()) / pl.col('`Act Orders Rev').std()).over('unique_id'))
+    df1 = df1.fill_nan(0)
+    df1=df1.pivot(index='unique_id',on='SALES_DATE',values='ynorm',aggregate_function='sum')
+    bi=Birch(n_clusters=6).fit(df1[:,1:])
+    df1=df1.drop('birch',strict=False)
+    df1=df1.with_columns(birch=bi.labels_)
+    df1=df1['unique_id','birch']
+    df=df.join(df1,on='unique_id')
+    df.write_parquet(f"data/{file_path}")
+
 def create_models_action(df, file_path):
     """Business logic for creating models"""
     forecast_list = []

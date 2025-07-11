@@ -4,3 +4,4 @@ arrow_odbc
 neuralforecast
 scikit-learn
 pandas
+pyodbc

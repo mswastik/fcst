@@ -16,3 +16,8 @@ packages/*
 archive/mlruns/*
 archive/checkpoints/*
 archive/lightning_logs/*
+archive/segments.csv
+archive/analysis.csv
+archive/Trauma-US.csv
+archive/charts.html
+archive/clustering data.pbix

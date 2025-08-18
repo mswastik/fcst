@@ -1,0 +1,1535 @@
+<body>
+    <style>
+        .catalog-number-table {
+            width: 200px; /* Adjust width as needed */
+            margin-right: 0px; /* Space between table and content */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px;
+            overflow-y: auto; /* Add scroll if list is long */
+            max-height: 80dvh; /* Adjust max height as needed */
+        }
+        .catalog-number-table h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        #catalog-number-list {
+            font-size: 0.9em;
+        }
+        #catalog-number-list div {
+            padding: 5px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+        }
+        #catalog-number-list div:hover {
+            background-color: #e9e9e9;
+        }
+        #catalog-number-list div.selected {
+            background-color: #cceeff;
+            font-weight: bold;
+        }
+    </style>
+    <div class="container">
+        <div class="main-content">
+            <div class="sidebar">
+                <div class="field-group">
+                    <h4>Rows</h4>
+                    <select class="field-list field-select" data-zone="rows" id="row-fields" multiple></select>
+                </div>
+                <div class="field-group">
+                    <h4>Columns</h4>
+                    <select class="field-list field-select" data-zone="columns" id="column-fields" multiple></select>
+                </div>
+        
+                <div class="field-group">
+                    <h4>Values</h4>
+                    <select class="field-list field-select" data-zone="values" id="value-fields" multiple></select>
+                </div>
+                <div class="field-group">
+                    <h4>Facet By</h4>
+                    <select class="field-list" id="facet-field">
+                        <option value="">None</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <h4>Filters</h4>
+                    <div class="filter-controls">
+                        <select id="filter-field" class="filter-select"><div></div></select>
+                      <div style="display:grid;grid-template-columns: 1fr 1fr;gap: 4px;">
+                        <!-- <button class="btn small" onclick="applyFilter()">Apply Filter</button>
+                        <button class="btn small danger" onclick="clearFilters()">Clear Filters</button> -->
+                      </div>
+                    </div>
+                    <div id="active-filters" class="active-filters"></div>
+                </div>
+            </div>
+            <div class="sidebar">
+            <div class="field-group">
+                <h4>Catalog Numbers</h4>
+                <a href="#" id="reset-catalog-filter" style="font-size: 1em; font-weight: 500; display: block; margin-bottom: 10px; margin-left:auto;">Reset Filter</a>
+            <div class="catalog-number-table">
+                <div id="catalog-number-list">
+                    <!-- Catalog numbers will be listed here -->
+                </div></div>
+            </div></div>
+
+            <div class="content-area">
+                <div class="view-tabs">
+                    <button class="tab" onclick="switchTab('table')">Table View</button>
+                    <button class="tab active" onclick="switchTab('chart')">Charts</button>
+                    <button class="tab" onclick="switchTab('metrics')">Key Metrics</button>
+                    <button class="tab" onclick="switchTab('raw')">Raw Data</button>
+                </div>
+
+                <div id="table-view" class="tab-content">
+                    <div id="pivot-output">
+                        <div class="empty-state">
+                            <h3>No Pivot Table Generated</h3>
+                            <p>Drag fields to the Rows, Columns, or Values sections and click "Generate Analysis" to start analyzing your data.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="chart-view" class="tab-content active">
+                    <div class="chart-controls">
+                        <select class="chart-select" id="chart-type" onchange="updateChart()">
+                            <option value="line">Line Chart</option>      
+                            <option value="bar">Bar Chart</option>
+                            <option value="pie">Pie Chart</option>
+                            <option value="doughnut">Doughnut Chart</option>
+                            <option value="radar">Radar Chart</option>
+                            <option value="polarArea">Polar Area</option>
+                        </select>
+                    </div>
+                    <div class="chart-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <div>
+                            <label for="chart-limit">Max Charts: </label>
+                            <input type="number" id="chart-limit" min="1" max="50" value="10" style="width: 60px;">
+                        </div>
+                        <button class="btn small" onclick="updateChart()">Update Charts</button>
+                    </div>
+                    <div id="chart-container" class="chart-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px;">
+                        <canvas id="pivotChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+
+                <div id="metrics-view" class="tab-content" style="width:100%">
+                    <div id="metrics-grid" class="grid-view">
+                        <div class="empty-state">
+                            <h3>No Metrics Available</h3>
+                            <p>Generate a pivot table first to see key metrics.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="raw-view" class="tab-content">
+                    <div class="controls" style="text-align: right; margin-bottom: 10px;">
+                        <button class="btn secondary" onclick="exportRawData()">Export Raw Data</button>
+                    </div>
+                    <div class="pivot-table">
+                        <div id="raw-data-output">
+                            <div class="empty-state">
+                                <h3>No Data Loaded</h3>
+                                <p>Load data to view raw data table.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function convertMultiSelectToAutocomplete() {
+        // Find all select elements with multiple attribute
+        const multiSelects = document.querySelectorAll('select[multiple]');
+        
+        multiSelects.forEach(select => {
+            // Remove existing custom multiselect if it was already converted
+            const existingCustomContainer = select.nextElementSibling;
+            if (existingCustomContainer && existingCustomContainer.classList.contains('custom-multiselect')) {
+                existingCustomContainer.remove();
+            }
+            
+            // Get original options
+            const options = Array.from(select.options).map(opt => ({
+                value: opt.value,
+                text: opt.textContent,
+                selected: opt.selected
+            }));
+            
+            // Create custom multiselect container
+            const container = document.createElement('div');
+            container.className = 'custom-multiselect';
+            container.style.position = 'relative';
+            container.style.width = '100%';
+            container.style.display = 'block';
+            
+            const multiselectContainer = document.createElement('div');
+            multiselectContainer.className = 'multiselect-container';
+            multiselectContainer.tabIndex = 0;
+            multiselectContainer.style.border = '1px solid #ccc';
+            multiselectContainer.style.borderRadius = '4px';
+            multiselectContainer.style.padding = '5px';
+            multiselectContainer.style.minHeight = '30px';
+            multiselectContainer.style.display = 'flex';
+            multiselectContainer.style.flexWrap = 'wrap';
+            multiselectContainer.style.alignItems = 'center';
+            multiselectContainer.style.gap = '4px';
+            multiselectContainer.style.backgroundColor = 'white';
+            
+            const selectedItems = document.createElement('div');
+            selectedItems.className = 'selected-items';
+            selectedItems.style.display = 'flex';
+            selectedItems.style.flexWrap = 'wrap';
+            selectedItems.style.gap = '4px';
+            selectedItems.style.flexGrow = '1';
+            
+            const searchInput = document.createElement('input');
+            searchInput.type = 'text';
+            searchInput.className = 'search-input';
+            searchInput.placeholder = 'Type to search...';
+            searchInput.style.border = 'none';
+            searchInput.style.outline = 'none';
+            searchInput.style.flexGrow = '1';
+            searchInput.style.minWidth = '50px';
+            
+            const arrow = document.createElement('div');
+            arrow.className = 'dropdown-arrow';
+            arrow.style.cursor = 'pointer';
+            
+            const dropdown = document.createElement('div');
+            dropdown.className = 'options-dropdown';
+            dropdown.style.position = 'absolute';
+            dropdown.style.top = '100%';
+            dropdown.style.left = '0';
+            dropdown.style.width = '100%';
+            dropdown.style.maxHeight = '200px';
+            dropdown.style.overflowY = 'auto';
+            dropdown.style.backgroundColor = 'white';
+            dropdown.style.border = '1px solid #ccc';
+            dropdown.style.borderRadius = '4px';
+            dropdown.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+            dropdown.style.zIndex = '1000';
+            dropdown.style.display = 'none';
+            
+            // Assemble structure
+            selectedItems.appendChild(searchInput);
+            multiselectContainer.appendChild(selectedItems);
+            multiselectContainer.appendChild(arrow);
+            container.appendChild(multiselectContainer);
+            container.appendChild(dropdown);
+            
+            // Insert after original select and hide original
+            select.parentNode.insertBefore(container, select.nextSibling);
+            select.style.display = 'none';
+            
+            let selectedValues = new Set();
+            let isOpen = false;
+            
+            function updateSelectedDisplay() {
+                // Update selectedValues from the actual select element
+                selectedValues = new Set(Array.from(select.selectedOptions).map(opt => opt.value));
+                
+                // Clear current display except search input
+                const tags = selectedItems.querySelectorAll('.selected-tag');
+                tags.forEach(tag => tag.remove());
+                
+                // Add selected items as tags
+                selectedValues.forEach(value => {
+                    const option = options.find(opt => opt.value === value);
+                    if (option) {
+                        const tag = document.createElement('div');
+                        tag.className = 'selected-tag';
+                        tag.innerHTML = `
+                            ${option.text}
+                            <span class="tag-remove" data-value="${option.value}">x</span>
+                        `;
+                        selectedItems.insertBefore(tag, searchInput);
+                    }
+                });
+                
+                // Show placeholder if no selections
+                if (selectedValues.size === 0) {
+                    searchInput.placeholder = 'Type to search...';
+                } else {
+                    searchInput.placeholder = '';
+                }
+                
+                // **CRITICAL FIX**: Trigger pivot generation after selection changes
+                generatePivot();
+            }
+
+            function filterOptions(searchTerm = '') {
+                dropdown.innerHTML = '';
+                
+                const filteredOptions = options.filter(opt =>
+                    opt.text.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+                
+                if (filteredOptions.length === 0) {
+                    const noOptions = document.createElement('div');
+                    noOptions.className = 'no-options';
+                    noOptions.textContent = 'No options found';
+                    dropdown.appendChild(noOptions);
+                    return;
+                }
+                
+                filteredOptions.forEach(option => {
+                    const item = document.createElement('div');
+                    item.className = 'option-item';
+                    if (selectedValues.has(option.value)) {
+                        item.classList.add('selected');
+                    }
+                    
+                    item.innerHTML = `
+                        <input type="checkbox" class="option-checkbox" ${selectedValues.has(option.value) ? 'checked' : ''}>
+                        <span>${option.text}</span>
+                    `;
+                    
+                    item.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const checkbox = item.querySelector('.option-checkbox');
+                        
+                        if (selectedValues.has(option.value)) {
+                            selectedValues.delete(option.value);
+                            checkbox.checked = false;
+                            item.classList.remove('selected');
+                        } else {
+                            selectedValues.add(option.value);
+                            checkbox.checked = true;
+                            item.classList.add('selected');
+                        }
+                        
+                        // Update the original select element
+                        Array.from(select.options).forEach(opt => {
+                            opt.selected = selectedValues.has(opt.value);
+                        });
+                        
+                        updateSelectedDisplay();
+                        applyFilter(); // Apply filter on selection change
+                    });
+                    
+                    dropdown.appendChild(item);
+                });
+            }
+            
+            // Attach functions to the original select element for external access
+            select._updateCustomDisplay = updateSelectedDisplay;
+            select._filterOptions = filterOptions;
+
+            function openDropdown() {
+                if (!isOpen) {
+                    isOpen = true;
+                    dropdown.style.display = 'block';
+                    arrow.classList.add('open');
+                    filterOptions(searchInput.value);
+                    searchInput.focus();
+                }
+            }
+            
+            function closeDropdown() {
+                if (isOpen) {
+                    isOpen = false;
+                    dropdown.style.display = 'none';
+                    arrow.classList.remove('open');
+                    searchInput.value = '';
+                }
+            }
+            
+            // Event listeners
+            multiselectContainer.addEventListener('click', (e) => {
+                if (e.target === multiselectContainer || e.target.classList.contains('selected-items')) {
+                    openDropdown();
+                }
+            });
+            
+            searchInput.addEventListener('input', (e) => {
+                if (!isOpen && e.target.value.length > 0) {
+                    openDropdown();
+                } else if (e.target.value.length === 0) {
+                    closeDropdown();
+                }
+                filterOptions(e.target.value);
+            });
+            
+            searchInput.addEventListener('focus', () => {
+                if (options.length > 0 || isOpen) {
+                    openDropdown();
+                }
+            });
+            selectedItems.addEventListener('change',(e) => {
+                console.log(e)
+                applyFilter();
+            })
+            // Remove tag functionality
+            selectedItems.addEventListener('click', (e) => {
+                if (e.target.classList.contains('tag-remove')) {
+                    const value = e.target.dataset.value;
+                    selectedValues.delete(value);
+                    
+                    // **CRITICAL FIX**: Update the original select element
+                    Array.from(select.options).forEach(opt => {
+                        if (opt.value === value) {
+                            opt.selected = false;
+                        }
+                    });
+                    
+                    updateSelectedDisplay();
+                    applyFilter();
+                    
+                    // Update dropdown if open
+                    if (isOpen) {
+                        filterOptions(searchInput.value);
+                    }
+                }
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!container.contains(e.target)) {
+                    closeDropdown();
+                }
+            });
+            
+            // Keyboard navigation
+            multiselectContainer.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (!isOpen) {
+                        openDropdown();
+                    }
+                } else if (e.key === 'Escape') {
+                    closeDropdown();
+                }
+            });
+            
+            // Initial call for this specific select element
+            updateSelectedDisplay();
+            filterOptions();
+        });
+    }
+    
+    let originalData = null;
+    let filteredData = null; // Holds data after activeFilters are applied
+    let currentData = null;  // Holds data after both activeFilters and catalog number selection
+    let currentPivotData = null;
+    let currentCharts = []; // Array to hold multiple chart instances
+    let draggedElement = null;
+    let activeFilters = [];
+    let selectedCatalogNumbers = [];
+    let facetField = null; // Selected field for faceting
+
+    // Data input functions
+    function toggleDataInput() {
+        const panel = document.getElementById('data-input-panel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function updateAvailableFields() {
+        if (currentData.length === 0) return;
+
+        const fields = Object.keys(currentData[0]);
+        const fieldSelects = document.querySelectorAll('.field-select');
+        const facetSelect = document.getElementById('facet-field');
+
+        fieldSelects.forEach(selectElement => {
+            selectElement.innerHTML = '';
+            fields.forEach(field => {
+                const option = document.createElement('option');
+                option.value = field;
+                option.textContent = field;
+                selectElement.appendChild(option);
+            });
+        });
+        
+        // Update facet field select
+        facetSelect.innerHTML = '<option value="">None</option>';
+        fields.forEach(field => {
+            const option = document.createElement('option');
+            option.value = field;
+            option.textContent = field;
+            facetSelect.appendChild(option);
+        });
+        facetSelect.onchange = function() {
+            facetField = this.value;
+            updateChart();
+        };
+        
+        populateFilterFields();
+        convertMultiSelectToAutocomplete();
+    }
+
+    function populateFilterFields() {
+        const filterFieldSelect = document.getElementById('filter-field');
+        filterFieldSelect.innerHTML = '<option value="">Select Field</option>';
+        const allowedFields = ['StrykerGroupRegion', 'Area', 'Region', 'Country', 'Business Sector', 'Business Unit', 'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7','CatalogNumber','birch','cluster'];
+        
+        allowedFields.forEach(field => {
+            const option = document.createElement('option');
+            option.value = field;
+            option.textContent = field;
+            filterFieldSelect.appendChild(option);
+        });
+        filterFieldSelect.onchange = updateFilterValueInput;
+    }
+
+    function updateFilterValueInput() {
+        const filterField = document.getElementById('filter-field').value;
+        const filterValueContainer = document.querySelector('.filter-controls');
+        let filterValueElement = document.getElementById('filter-value');
+
+        if (filterValueElement) {
+            filterValueElement.remove();
+        }
+
+        if (!filterField) {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.id = 'filter-value';
+            input.placeholder = 'Filter value';
+            input.className = 'filter-input';
+            filterValueContainer.insertBefore(input, filterValueContainer.children[2]);
+            return;
+        }
+
+        const selectElement = document.createElement('select');
+        selectElement.id = 'filter-value';
+        selectElement.setAttribute('multiple', 'true');
+        selectElement.className = 'filter-select';
+        selectElement.innerHTML = '<option value="">Select Value(s)</option>';
+
+        const uniqueValues = getUniqueValues(filterField);
+        uniqueValues.forEach(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            selectElement.appendChild(option);
+        });
+        filterValueContainer.insertBefore(selectElement, filterValueContainer.children[1]);
+        convertMultiSelectToAutocomplete();
+    }
+
+    function getUniqueValues(field) {
+        const values = new Set();
+        originalData.forEach(row => {
+            if (row[field] !== undefined && row[field] !== null) {
+                values.add(String(row[field]));
+            }
+        });
+        return Array.from(values).sort();
+    }
+    
+    function clearFilters() {
+        activeFilters = [];
+        filterData();
+        document.querySelectorAll('.custom-multiselect').forEach(element => {
+            element.remove();
+        });
+        renderActiveFilters();
+        convertMultiSelectToAutocomplete();
+    }
+
+    function applyFilter() {
+        const field = document.getElementById('filter-field').value;
+        const filterValueElement = document.getElementById('filter-value');
+        let values = [];
+
+        if (filterValueElement.tagName === 'SELECT' && filterValueElement.multiple) {
+            values = Array.from(filterValueElement.selectedOptions).map(option => option.value);
+        } else {
+            values = [filterValueElement.value];
+        }
+
+        if (!field || values.length === 0 || (values.length === 1 && values[0] === '')) {
+            // Remove any existing filter for this field
+            const index = activeFilters.findIndex(f => f.field === field);
+            if (index !== -1) {
+                activeFilters.splice(index, 1);
+                filterData();
+                renderActiveFilters();
+            }
+            return;
+        }
+
+        // Check if there's already a filter for this field
+        const existingIndex = activeFilters.findIndex(f => f.field === field);
+        if (existingIndex !== -1) {
+            // Replace it
+            activeFilters[existingIndex] = { field, values };
+        } else {
+            // Add new
+            activeFilters.push({ field, values });
+        }
+
+        filterData();
+        renderActiveFilters();
+    }
+
+    function filterData() {
+        // First apply active filters to originalData -> filteredData
+        filteredData = [...originalData];
+        activeFilters.forEach(filter => {
+            filteredData = filteredData.filter(row => {
+                const rowValue = String(row[filter.field]).toLowerCase();
+                if (Array.isArray(filter.values)) {
+                    return filter.values.some(val => rowValue.includes(String(val).toLowerCase()));
+                } else {
+                    return rowValue.includes(String(filter.values).toLowerCase());
+                }
+            });
+        });
+        
+        // Then apply catalog number selection to filteredData -> currentData
+        currentData = [...filteredData];
+        if (selectedCatalogNumbers.length > 0) {
+            currentData = currentData.filter(row => selectedCatalogNumbers.includes(row.CatalogNumber));
+        }
+
+        updateRawDataView();
+        generatePivot();
+        renderCatalogNumberTable(); // Update catalog number list using filteredData
+    }
+
+    function renderActiveFilters() {
+        const activeFiltersDiv = document.getElementById('active-filters');
+        activeFiltersDiv.innerHTML = '';
+        if (activeFilters.length === 0) {
+            activeFiltersDiv.innerHTML = '<p>No active filters.</p>';
+            return;
+        }
+        activeFilters.forEach((filter, index) => {
+            const filterTag = document.createElement('span');
+            filterTag.className = 'filter-tag';
+            const displayValue = Array.isArray(filter.values) ? filter.values.join(', ') : filter.values;
+            filterTag.innerHTML = `${filter.field}: "${displayValue}" <span class="remove-filter" data-index="${index}">&times;</span>`;
+            filterTag.querySelector('.remove-filter').addEventListener('click', removeFilter);
+            activeFiltersDiv.appendChild(filterTag);
+        });
+    }
+
+    function removeFilter(event) {
+        const index = parseInt(event.target.getAttribute('data-index'));
+        activeFilters.splice(index, 1);
+        filterData();
+        renderActiveFilters();
+    }
+
+    function updateRawDataView() {
+        const rawOutput = document.getElementById('raw-data-output');
+        
+        if (currentData.length === 0) {
+            rawOutput.innerHTML = `
+                <div class="empty-state">
+                    <h3>No Data Loaded</h3>
+                    <p>Load data to view raw data table.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const fields = Object.keys(currentData[0]);
+        let html = '<table>';
+        
+        html += '<tr>';
+        fields.forEach(field => {
+            html += `<th>${field}</th>`;
+        });
+        html += '</tr>';
+        
+        const displayData = currentData.slice(0, 100);
+        displayData.forEach(row => {
+            html += '<tr>';
+            fields.forEach(field => {
+                const value = row[field];
+                const cellClass = typeof value === 'number' ? 'numeric' : '';
+                html += `<td class="${cellClass}">${formatValue(value)}</td>`;
+            });
+            html += '</tr>';
+        });
+        
+        if (currentData.length > 100) {
+            html += `<tr><td colspan="${fields.length}" style="text-align: center; font-style: italic; color: #666;">Showing first 100 of ${currentData.length} rows</td></tr>`;
+        }
+        
+        html += '</table>';
+        rawOutput.innerHTML = html;
+    }
+
+    // Tab switching
+    function switchTab(tabName) {
+        // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(tabName + '-view').classList.add('active');
+            
+            // If switching to chart view, update chart
+            if (tabName === 'chart' && currentPivotData) {
+                setTimeout(() => updateChart(), 100);
+            }
+        }
+
+        // Initialize drag and drop
+        function initializeDragAndDrop() {
+            const dropZones = document.querySelectorAll('.field-list');
+
+            dropZones.forEach(zone => {
+                zone.addEventListener('dragover', handleDragOver);
+                zone.addEventListener('drop', handleDrop);
+                zone.addEventListener('dragenter', handleDragEnter);
+                zone.addEventListener('dragleave', handleDragLeave);
+            });
+        }
+
+        function handleDragStart(e) {
+            draggedElement = e.target;
+            e.target.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', e.target.outerHTML);
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        function handleDragEnter(e) {
+            e.preventDefault();
+            e.target.classList.add('drag-over');
+        }
+
+        function handleDragLeave(e) {
+            e.target.classList.remove('drag-over');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.target.classList.remove('drag-over');
+
+            if (draggedElement) {
+                const fieldName = draggedElement.getAttribute('data-field');
+                const targetZone = e.target.getAttribute('data-zone');
+                
+                // Remove from current location
+                draggedElement.remove();
+                
+                // Add to new location
+                if (targetZone === 'values') {
+                    addFieldToValues(fieldName, e.target);
+                } else {
+                    addFieldToZone(fieldName, e.target);
+                }
+                
+                draggedElement = null;
+                generatePivot(); // Trigger pivot table generation after drop
+            }
+        }
+
+        function addFieldToZone(fieldName, targetZone) {
+            const newField = document.createElement('div');
+            newField.className = 'field-item';
+            newField.draggable = true;
+            newField.setAttribute('data-field', fieldName);
+            newField.textContent = fieldName;
+            
+            // Add event listeners
+            newField.addEventListener('dragstart', handleDragStart);
+            newField.addEventListener('dragend', handleDragEnd);
+            
+            targetZone.appendChild(newField);
+            generatePivot(); // Trigger pivot table generation after adding field
+        }
+
+        function addFieldToValues(fieldName, targetZone) {
+            const newField = document.createElement('div');
+            newField.className = 'field-item';
+            newField.draggable = true;
+            newField.setAttribute('data-field', fieldName);
+            
+            // Add aggregation selector for value fields
+            const select = document.createElement('select');
+            select.className = 'aggregation-select';
+            select.innerHTML = `
+                <option value="sum">Sum</option>
+                <option value="avg">Mean</option>
+                <option value="count">Count</option>
+                <option value="min">Min</option>
+                <option value="max">Max</option>
+            `;
+            
+            newField.innerHTML = `${fieldName} `;
+            newField.appendChild(select);
+            
+            // Add event listeners
+            newField.addEventListener('dragstart', handleDragStart);
+            newField.addEventListener('dragend', handleDragEnd);
+            select.addEventListener('change', generatePivot); // Add this line
+            
+            targetZone.appendChild(newField);
+            generatePivot(); // Trigger pivot table generation after adding value field
+        }
+
+        function generatePivot() {
+            const rowFields = getFieldsFromZone('rows');
+            const columnFields = getFieldsFromZone('columns');
+            const valueFields = getFieldsFromZone('values');
+
+            currentPivotData = createPivotTable(currentData, rowFields, columnFields, valueFields);
+            renderPivotTable(currentPivotData, rowFields, columnFields, valueFields);
+            generateMetrics(currentPivotData, rowFields, columnFields, valueFields);
+            
+            // Update chart if chart tab is active
+            if (document.getElementById('chart-view').classList.contains('active')) {
+                updateChart();
+            }
+        }
+
+        function getFieldsFromZone(zone) {
+            const zoneElement = document.getElementById(`${zone === 'rows' ? 'row' : zone === 'columns' ? 'column' : 'value'}-fields`);
+            const fields = [];
+            
+            if (zoneElement && zoneElement.tagName === 'SELECT') {
+                Array.from(zoneElement.selectedOptions).forEach(option => {
+                    const field = option.value;
+                    if (zone === 'values') {
+                        // Default to 'sum' for value fields, as there's no individual aggregation selector
+                        fields.push({field, aggregation: 'sum'});
+                    } else {
+                        fields.push(field);
+                    }
+                });
+            }
+            
+            return fields;
+        }
+
+        function createPivotTable(data, rowFields, columnFields, valueFields) {
+            const pivot = {};
+            const columnValues = new Set();
+            
+            // Collect all unique column values
+            if (columnFields.length > 0) {
+                data.forEach(row => {
+                    const colKey = columnFields.map(field => row[field]).join(' | ');
+                    columnValues.add(colKey);
+                });
+            }
+
+            // Group data by row fields
+            data.forEach(row => {
+                const rowKey = rowFields.length > 0 ? rowFields.map(field => row[field]).join(' | ') : 'Total';
+                const colKey = columnFields.length > 0 ? columnFields.map(field => row[field]).join(' | ') : 'Total';
+                
+                if (!pivot[rowKey]) {
+                    pivot[rowKey] = {};
+                }
+                
+                if (!pivot[rowKey][colKey]) {
+                    pivot[rowKey][colKey] = {};
+                }
+                
+                valueFields.forEach(valueField => {
+                    const {field, aggregation} = valueField;
+                    const key = `${field}_${aggregation}`;
+                    
+                    if (!pivot[rowKey][colKey][key]) {
+                        pivot[rowKey][colKey][key] = [];
+                    }
+                    
+                    pivot[rowKey][colKey][key].push(row[field]);
+                });
+            });
+
+            // Calculate aggregations
+            Object.keys(pivot).forEach(rowKey => {
+                Object.keys(pivot[rowKey]).forEach(colKey => {
+                    Object.keys(pivot[rowKey][colKey]).forEach(valueKey => {
+                        const values = pivot[rowKey][colKey][valueKey];
+                        const aggregation = valueKey.split('_')[1];
+                        
+                        pivot[rowKey][colKey][valueKey] = calculateAggregation(values, aggregation);
+                    });
+                });
+            });
+
+            return {
+                data: pivot,
+                columnValues: Array.from(columnValues).sort(),
+                rowKeys: Object.keys(pivot).sort()
+            };
+        }
+
+        function calculateAggregation(values, aggregation) {
+            switch (aggregation) {
+                case 'sum':
+                    return values.reduce((sum, val) => sum + (val || 0), 0);
+                case 'avg':
+                    return values.reduce((sum, val) => sum + (val || 0), 0) / values.length;
+                case 'count':
+                    return values.length;
+                case 'min':
+                    return Math.min(...values.filter(v => v != null));
+                case 'max':
+                    return Math.max(...values.filter(v => v != null));
+                default:
+                    return values.reduce((sum, val) => sum + (val || 0), 0);
+            }
+        }
+
+        function renderPivotTable(pivotData, rowFields, columnFields, valueFields) {
+            const outputDiv = document.getElementById('pivot-output');
+            
+            let html = '<div class="pivot-table"><table>';
+            
+            // Header row
+            html += '<tr>';
+            if (rowFields.length > 0) {
+                html += `<th>${rowFields.join(' / ')}</th>`;
+            }
+            
+            if (columnFields.length === 0) {
+                valueFields.forEach(vf => {
+                    html += `<th>${vf.field} (${vf.aggregation})</th>`;
+                });
+            } else {
+                pivotData.columnValues.forEach(colValue => {
+                    valueFields.forEach(vf => {
+                        html += `<th>${colValue}<br><small>${vf.field} (${vf.aggregation})</small></th>`;
+                    });
+                });
+            }
+            html += '</tr>';
+            
+            // Data rows
+            pivotData.rowKeys.forEach(rowKey => {
+                html += '<tr>';
+                if (rowFields.length > 0) {
+                    html += `<td><strong>${rowKey}</strong></td>`;
+                }
+                
+                if (columnFields.length === 0) {
+                    valueFields.forEach(vf => {
+                        const key = `${vf.field}_${vf.aggregation}`;
+                        const value = pivotData.data[rowKey]['Total'] ? pivotData.data[rowKey]['Total'][key] : 0;
+                        html += `<td class="numeric">${formatNumber(value)}</td>`;
+                    });
+                } else {
+                    pivotData.columnValues.forEach(colValue => {
+                        valueFields.forEach(vf => {
+                            const key = `${vf.field}_${vf.aggregation}`;
+                            const value = pivotData.data[rowKey][colValue] ? pivotData.data[rowKey][colValue][key] : 0;
+                            html += `<td class="numeric">${formatNumber(value)}</td>`;
+                        });
+                    });
+                }
+                html += '</tr>';
+            });
+            
+            html += '</table></div>';
+            outputDiv.innerHTML = html;
+        }
+
+        function generateMetrics(pivotData, rowFields, columnFields, valueFields) {
+            const metricsGrid = document.getElementById('metrics-grid');
+            
+            if (!pivotData || valueFields.length === 0) {
+                metricsGrid.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No Metrics Available</h3>
+                        <p>Generate a pivot table first to see key metrics.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            
+            // Group data by SALES_DATE for QoQ calculations (quarterly)
+            const salesDataByQuarter = {};
+            // Group data by SALES_DATE for YoY calculations (yearly)
+            const salesDataByYear = {};
+
+            currentData.forEach(row => {
+                const salesDate = row['SALES_DATE'];
+                if (salesDate) {
+                    const date = new Date(salesDate);
+                    const year = date.getFullYear();
+                    const month = date.getMonth(); // 0-11
+                    const quarter = Math.floor(month / 3) + 1;
+                    const yearQuarter = `${year}-Q${quarter}`;
+                    
+                    // For QoQ
+                    if (!salesDataByQuarter[yearQuarter]) {
+                        salesDataByQuarter[yearQuarter] = {};
+                    }
+                    // For YoY
+                    if (!salesDataByYear[year]) {
+                        salesDataByYear[year] = {};
+                    }
+
+                    valueFields.forEach(vf => {
+                        const field = vf.field;
+                        const value = row[field];
+
+                        // For QoQ
+                        if (!salesDataByQuarter[yearQuarter][field]) {
+                            salesDataByQuarter[yearQuarter][field] = [];
+                        }
+                        if (value !== undefined && value !== null && !isNaN(value)) {
+                            salesDataByQuarter[yearQuarter][field].push(value);
+                        }
+
+                        // For YoY
+                        if (!salesDataByYear[year][field]) {
+                            salesDataByYear[year][field] = [];
+                        }
+                        if (value !== undefined && value !== null && !isNaN(value)) {
+                            salesDataByYear[year][field].push(value);
+                        }
+                    });
+                }
+            });
+
+            const sortedQuarters = Object.keys(salesDataByQuarter).sort();
+            const sortedYears = Object.keys(salesDataByYear).sort();
+
+            valueFields.forEach(vf => {
+                const field = vf.field;
+                
+                // QoQ Table
+                html += `<div class="pivot-table"><table>`;
+                html += `<h3 style="padding-left:20px;font-weight:500;">${field} (${vf.aggregation}) QoQ Growth</h3>`;
+                html += `<tr><th>Quarter</th><th>Value</th><th>QoQ Growth</th></tr>`;
+
+                sortedQuarters.forEach((currentQY, index) => {
+                    const [currentYearStr, currentQuarterStr] = currentQY.split('-Q');
+                    const currentYear = parseInt(currentYearStr);
+                    const currentQuarter = parseInt(currentQuarterStr);
+
+                    const currentValue = salesDataByQuarter[currentQY] && salesDataByQuarter[currentQY][field] ?
+                                         calculateAggregation(salesDataByQuarter[currentQY][field], vf.aggregation) : 0;
+
+                    let qoqGrowth = 'N/A';
+                    if (index > 0) {
+                        let prevQuarterYear = currentYear;
+                        let prevQuarter = currentQuarter - 1;
+                        if (prevQuarter === 0) {
+                            prevQuarter = 4;
+                            prevQuarterYear--;
+                        }
+                        const prevQY = `${prevQuarterYear}-Q${prevQuarter}`;
+                        const prevValue = salesDataByQuarter[prevQY] && salesDataByQuarter[prevQY][field] ?
+                                          calculateAggregation(salesDataByQuarter[prevQY][field], vf.aggregation) : 0;
+                        
+                        if (prevValue !== 0) {
+                            qoqGrowth = (((currentValue - prevValue) / prevValue) * 100).toFixed(2) + '%';
+                        } else if (currentValue !== 0) {
+                            qoqGrowth = 'Inf%';
+                        } else {
+                            qoqGrowth = '0.00%';
+                        }
+                    }
+
+                    html += `
+                        <tr>
+                            <td>${currentQY}</td>
+                            <td class="numeric">${formatNumber(currentValue)}</td>
+                            <td>${qoqGrowth}</td>
+                        </tr>
+                    `;
+                });
+                html += `</table></div>`;
+
+                // YoY Table (Full Calendar Year)
+                html += `<div class="pivot-table"><table>`;
+                html += `<h3 style="padding-left:20px;font-weight:500;">${field} (${vf.aggregation}) YoY Growth (Full Year)</h3>`;
+                html += `<tr><th>Year</th><th>Value</th><th>YoY Growth</th></tr>`;
+
+                sortedYears.forEach((currentYear, index) => {
+                    const currentValue = salesDataByYear[currentYear] && salesDataByYear[currentYear][field] ?
+                                         calculateAggregation(salesDataByYear[currentYear][field], vf.aggregation) : 0;
+
+                    let yoyGrowth = 'N/A';
+                    if (index > 0) {
+                        const prevYear = parseInt(currentYear) - 1;
+                        const prevYearValue = salesDataByYear[prevYear] && salesDataByYear[prevYear][field] ?
+                                              calculateAggregation(salesDataByYear[prevYear][field], vf.aggregation) : 0;
+                        
+                        if (prevYearValue !== 0) {
+                            yoyGrowth = (((currentValue - prevYearValue) / prevYearValue) * 100).toFixed(2) + '%';
+                        } else if (currentValue !== 0) {
+                            yoyGrowth = 'Inf%';
+                        } else {
+                            yoyGrowth = '0.00%';
+                        }
+                    }
+
+                    html += `
+                        <tr>
+                            <td>${currentYear}</td>
+                            <td class="numeric">${formatNumber(currentValue)}</td>
+                            <td>${yoyGrowth}</td>
+                        </tr>
+                    `;
+                });
+                html += `</table></div>`;
+            });
+            
+            metricsGrid.innerHTML = html;
+        }
+
+        function updateChart() {
+            const chartContainer = document.getElementById('chart-container');
+            chartContainer.innerHTML = ''; // Clear existing charts
+            
+            // Destroy any existing charts
+            currentCharts.forEach(chart => chart.destroy());
+            currentCharts = [];
+            if (!currentPivotData) return;
+            
+            const chartType = document.getElementById('chart-type').value;
+            const maxCharts = parseInt(document.getElementById('chart-limit').value) || 10;
+            
+            if (!facetField) {
+                // No facet - single chart
+                const canvas = document.createElement('canvas');
+                canvas.width = 400;
+                canvas.height = 200;
+                chartContainer.appendChild(canvas);
+                
+                const ctx = canvas.getContext('2d');
+                const chartData = prepareChartData(currentPivotData);
+                const config = createChartConfig(chartType, chartData);
+                currentCharts.push(new Chart(ctx, config));
+            } else {
+                // Facet charts
+                const uniqueFacetValues = getUniqueValues(facetField).slice(0, maxCharts);
+                uniqueFacetValues.forEach(facetValue => {
+                    const facetData = currentData.filter(row => row[facetField].toString() === facetValue);
+                    const pivotData = createPivotTable(facetData,
+                        getFieldsFromZone('rows'),
+                        getFieldsFromZone('columns'),
+                        getFieldsFromZone('values'));
+                    const chartDiv = document.createElement('div');
+                    chartDiv.className = 'facet-chart';
+                    
+                    //const title = document.createElement('h4');
+                    //title.textContent = `${facetField}: ${facetValue}`;
+                    //chartDiv.appendChild(title);
+                    const chartWrapper = document.createElement('div');
+                    chartWrapper.style.width = '450px';
+                    chartWrapper.style.height = '400px';
+                    chartWrapper.style.position = 'relative';
+                    chartWrapper.style.marginBottom = '10px';
+
+
+                    const canvas = document.createElement('canvas');
+                    chartWrapper.appendChild(canvas);
+                    chartDiv.appendChild(chartWrapper);
+                    
+                    chartContainer.appendChild(chartDiv);
+                    
+                    const ctx = canvas.getContext('2d');
+                    const chartData = prepareChartData(pivotData);
+                    const config = createChartConfig(chartType, chartData, `${facetField}: ${facetValue}`);
+                    currentCharts.push(new Chart(ctx, config));
+                });
+            }
+        }
+        
+        function createChartConfig(chartType, chartData, title='Pivot Data Visualization') {
+            return {
+                type: chartType,
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: title
+                        },
+                        legend: {
+                            display: chartType !== 'pie' && chartType !== 'doughnut'
+                        }
+                    },
+                    scales: chartType === 'pie' || chartType === 'doughnut' || chartType === 'polarArea' ? {} : {
+                        y: {
+                            beginAtZero: true
+                        }
+                    },
+                pointRadius: 1,
+                }
+            };
+        }
+
+        function prepareChartData(pivotData) {
+            if (!pivotData) return { labels: [], datasets: [] };
+            
+            const columnFields = getFieldsFromZone('columns');
+            const valueFields = getFieldsFromZone('values');
+            const labels = pivotData.rowKeys.map(label => {
+        const date = new Date(label);
+        if (!isNaN(date.getTime())) {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return months[date.getMonth()] + '-' + date.getFullYear().toString().substr(-2);
+        }
+        return label; // Return original label if not a valid date
+    });
+            const datasets = [];
+            
+            if (columnFields.length === 0) {
+                valueFields.forEach((vf, index) => {
+                    const key = `${vf.field}_${vf.aggregation}`;
+                    const data = pivotData.rowKeys.map(rowKey => {
+                        return pivotData.data[rowKey]['Total']?.[key] || 0;
+                    });
+                    
+                    datasets.push({
+                        label: `${vf.field} (${vf.aggregation})`,
+                        data: data,
+                        backgroundColor: generateColors(pivotData.rowKeys.length, index),
+                        borderColor: generateColors(pivotData.rowKeys.length, index, 0.8),
+                        borderWidth: 2
+                    });
+                });
+              } else {
+                pivotData.columnValues.forEach((colValue, colIndex) => {
+                    valueFields.forEach((vf, valIndex) => {
+                        const key = `${vf.field}_${vf.aggregation}`;
+                        const data = pivotData.rowKeys.map(rowKey => {
+                            return pivotData.data[rowKey]?.[colValue]?.[key] || 0;
+                        });
+                        
+                        datasets.push({
+                            label: `${colValue} - ${vf.field} (${vf.aggregation})`,
+                            data: data,
+                            backgroundColor: generateColors(pivotData.columnValues.length * valueFields.length, colIndex * valueFields.length + valIndex, 0.7),
+                            borderColor: generateColors(pivotData.columnValues.length * valueFields.length, colIndex * valueFields.length + valIndex, 1),
+                            borderWidth: 2
+                        });
+                    });
+                });
+            }
+            
+            return { labels, datasets };
+        }
+
+        function generateColors(count, index, alpha = 0.7) {
+            const colors = [
+                `rgba(102, 126, 234, ${alpha})`,
+                `rgba(118, 75, 162, ${alpha})`,
+                `rgba(255, 99, 132, ${alpha})`,
+                `rgba(54, 162, 235, ${alpha})`,
+                `rgba(255, 205, 86, ${alpha})`,
+                `rgba(75, 192, 192, ${alpha})`,
+                `rgba(153, 102, 255, ${alpha})`,
+                `rgba(255, 159, 64, ${alpha})`,
+                `rgba(199, 199, 199, ${alpha})`,
+                `rgba(83, 102, 255, ${alpha})`
+            ];
+            
+            //if (count === 1) {
+            //    return colors.slice(0, 10);
+            //}
+            
+            return colors[index % colors.length];
+        }
+
+        function formatNumber(num) {
+            if (num === null || num === undefined) return '0';
+            if (typeof num === 'number') {
+                return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+            }
+            return num;
+        }
+
+        function formatValue(value) {
+            if (typeof value === 'number') {
+                return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+            }
+            return value || '';
+        }
+
+        function renderCatalogNumberTable() {
+            const catalogNumberListDiv = document.getElementById('catalog-number-list');
+            catalogNumberListDiv.innerHTML = ''; // Clear existing list
+
+            if (!filteredData || filteredData.length === 0) {
+                catalogNumberListDiv.innerHTML = '<p>No data loaded.</p>';
+                return;
+            }
+
+            // Get unique catalog numbers from filtered data (after activeFilters)
+            const uniqueCatalogNumbers = Array.from(
+                new Set(filteredData.map(row => row.CatalogNumber).filter(cn => cn !== undefined && cn !== null))
+            ).sort();
+
+            if (uniqueCatalogNumbers.length === 0) {
+                catalogNumberListDiv.innerHTML = '<p>No Catalog Numbers found.</p>';
+                return;
+            }
+
+            uniqueCatalogNumbers.forEach(catalogNumber => {
+                const itemDiv = document.createElement('div');
+                itemDiv.textContent = catalogNumber;
+                itemDiv.setAttribute('data-catalog-number', catalogNumber);
+                if (selectedCatalogNumbers.includes(catalogNumber)) {
+                    itemDiv.classList.add('selected');
+                }
+                itemDiv.addEventListener('click', handleCatalogNumberClick);
+                catalogNumberListDiv.appendChild(itemDiv);
+            });
+        }
+
+        function handleCatalogNumberClick(event) {
+            const catalogNumber = event.target.getAttribute('data-catalog-number');
+            const index = selectedCatalogNumbers.indexOf(catalogNumber);
+            if (index === -1) {
+                selectedCatalogNumbers.push(catalogNumber);
+            } else {
+                selectedCatalogNumbers.splice(index, 1);
+            }
+            event.target.classList.toggle('selected');
+            filterData();
+        }
+        function resetCatalogNumberFilter() {
+            selectedCatalogNumbers = [];
+            const catalogNumberListDiv = document.getElementById('catalog-number-list');
+            catalogNumberListDiv.querySelectorAll('div').forEach(item => {
+                item.classList.remove('selected');
+            });
+            filterData(); // Will update currentData without catalog number filter
+        }
+
+        function clearAll() {
+            const zones = ['row-fields', 'column-fields', 'value-fields'];
+            
+            zones.forEach(zoneId => {
+                const selectElement = document.getElementById(zoneId);
+                if (selectElement && selectElement.tagName === 'SELECT') {
+                    Array.from(selectElement.options).forEach(option => {
+                        option.selected = false; // Deselect all options
+                    });
+                    // Trigger update for custom multiselect displays
+                    if (selectElement && selectElement._updateCustomDisplay) {
+                        selectElement._updateCustomDisplay();
+                    }
+                }
+            });
+            
+            // Reset facet field
+            const facetSelect = document.getElementById('facet-field');
+            facetSelect.value = '';
+            facetField = null;
+            
+            // Clear outputs
+            document.getElementById('pivot-output').innerHTML = `
+                <div class="empty-state">
+                    <h3>No Pivot Table Generated</h3>
+                    <p>Select fields from the dropdowns in the Rows, Columns, or Values sections and click "Generate Analysis" to start analyzing your data.</p>
+                </div>
+            `;
+            
+            document.getElementById('metrics-grid').innerHTML = `
+                <div class="empty-state">
+                    <h3>No Metrics Available</h3>
+                    <p>Generate a pivot table first to see key metrics.</p>
+                </div>
+            `;
+            
+            // Destroy all charts
+            currentCharts.forEach(chart => chart.destroy());
+            currentCharts = [];
+            currentPivotData = null;
+            generatePivot(); // Trigger pivot table generation after clearing all
+        }
+
+        function exportData() {
+            if (!currentPivotData) {
+                alert('Generate a pivot table first to export data.');
+                return;
+            }
+            
+            const rowFields = getFieldsFromZone('rows');
+            const columnFields = getFieldsFromZone('columns');
+            const valueFields = getFieldsFromZone('values');
+            
+            let csvContent = '';
+            
+            // Header row
+            const headers = [];
+            if (rowFields.length > 0) {
+                headers.push(rowFields.join(' / '));
+            }
+            
+            if (columnFields.length === 0) {
+                valueFields.forEach(vf => {
+                    headers.push(`${vf.field} (${vf.aggregation})`);
+                });
+            } else {
+                currentPivotData.columnValues.forEach(colValue => {
+                    valueFields.forEach(vf => {
+                        headers.push(`${colValue} - ${vf.field} (${vf.aggregation})`);
+                    });
+                });
+            }
+            
+            csvContent += headers.join(',') + '\\n';
+            
+            // Data rows
+            currentPivotData.rowKeys.forEach(rowKey => {
+                const row = [];
+                if (rowFields.length > 0) {
+                    row.push(`"${rowKey}"`);
+                }
+                
+                if (columnFields.length === 0) {
+                    valueFields.forEach(vf => {
+                        const key = `${vf.field}_${vf.aggregation}`;
+                        const value = currentPivotData.data[rowKey]['Total'] ? currentPivotData.data[rowKey]['Total'][key] : 0;
+                        row.push(value);
+                    });
+                } else {
+                    currentPivotData.columnValues.forEach(colValue => {
+                        valueFields.forEach(vf => {
+                            const key = `${vf.field}_${vf.aggregation}`;
+                            const value = currentPivotData.data[rowKey][colValue] ? currentPivotData.data[rowKey][colValue][key] : 0;
+                            row.push(value);
+                        });
+                    });
+                }
+                
+                csvContent += row.join(',') + '\\n';
+            });
+            
+            // Download CSV
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'pivot_analysis.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+        function exportRawData() {
+            if (!currentData || currentData.length === 0) {
+                alert('No raw data available to export.');
+                return;
+            }
+
+            const fields = Object.keys(currentData[0]);
+            let csvContent = '';
+
+            // Header row
+            csvContent += fields.map(field => `"${field}"`).join(',') + '\\n';
+
+            // Data rows
+            currentData.forEach(row => {
+                const rowValues = fields.map(field => {
+                    const value = row[field];
+                    // Handle values that might contain commas or newlines by enclosing them in quotes
+                    if (typeof value === 'string' && (value.includes(',') || value.includes('\\n') || value.includes('"'))) {
+                        return `"${value.replace(/"/g, '""')}"`; // Escape double quotes
+                    }
+                    return value;
+                });
+                csvContent += rowValues.join(',') + '\\n';
+            });
+
+            // Download CSV
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'raw_data.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Function to programmatically load data
+        function loadDataProgrammatically(data) {
+            if (!Array.isArray(data) || data.length === 0) {
+                alert('Invalid data provided. Please provide an array of objects.');
+                return;
+            }
+            originalData = data; // Store original data
+            filteredData = [...originalData]; // Initialize filteredData with original
+            currentData = [...originalData];  // Initialize currentData with original
+            updateAvailableFields();
+            updateRawDataView();
+            clearAll(); // Clear existing pivot/charts
+            clearFilters(); // Clear any active filters
+            // Update views
+            updateRawDataView();
+            renderCatalogNumberTable(); // Render the CatalogNumber table
+            // Optionally, generate pivot table immediately after loading data
+            
+            // Set default selections
+            const rowFieldsSelect = document.getElementById('row-fields');
+            const columnFieldsSelect = document.getElementById('column-fields');
+            const valueFieldsSelect = document.getElementById('value-fields');
+
+            // Clear existing selections first
+            Array.from(rowFieldsSelect.options).forEach(option => option.selected = false);
+            const resetLink = document.getElementById('reset-catalog-filter');
+            if (resetLink) {
+                resetLink.addEventListener('click', function(e) {
+                    e.preventDefault(); // Prevent default link behavior
+                    resetCatalogNumberFilter();
+                });
+            }
+            Array.from(columnFieldsSelect.options).forEach(option => option.selected = false);
+            Array.from(valueFieldsSelect.options).forEach(option => option.selected = false);
+
+            // Select default row field
+            const defaultRowField = 'SALES_DATE';
+            const rowOption = Array.from(rowFieldsSelect.options).find(opt => opt.value === defaultRowField);
+            if (rowOption) {
+                rowOption.selected = true;
+            }
+
+            // Select default value fields
+            const defaultValueFields = ['`Act Orders Rev', 'NHITS', '`Fcst Stat Final Rev'];
+            defaultValueFields.forEach(field => {
+                const valueOption = Array.from(valueFieldsSelect.options).find(opt => opt.value === field);
+                if (valueOption) {
+                    valueOption.selected = true;
+                }
+            });
+
+            // Trigger change events to update the custom autocomplete display
+            [rowFieldsSelect, columnFieldsSelect, valueFieldsSelect].forEach(s => {
+                if (s._updateCustomDisplay) {
+                    s._updateCustomDisplay();
+                }
+            });
+            
+            generatePivot(); // Generate pivot table with default values
+        }
+
+        // Expose the function globally for external calls (e.g., from parent window or other scripts)
+        window.loadPivotData = loadDataProgrammatically;
+        loadDataProgrammatically({{df_json}})
+        
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', function() {
+            // Instead of loading data directly, we'll wait for the server to call window.loadPivotData
+            updateRawDataView();
+            // Ensure conversion happens after the DOM is ready and initial data might be loaded
+            convertMultiSelectToAutocomplete();
+        });
+    </script></body>

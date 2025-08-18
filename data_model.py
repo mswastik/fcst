@@ -72,9 +72,10 @@ def get_filter_options(prod=products[0],loc=locations[0]):
 
 def get_chart_data(type,filtered_df):
     """Get data formatted for charts"""
+    print(filtered_df)
     if len(filtered_df) == 0:
         return None
-    
+    filtered_df=pl.DataFrame(filtered_df)
     chart_data = filtered_df.clone()
     # Group by month if toggle is active
     if by_month:

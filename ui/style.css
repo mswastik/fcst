@@ -14,7 +14,7 @@ body {
 }
 
 .container {
-    max-width: 1600px;
+    min-width: 1600px;
     margin: 0 auto;
     background: rgba(255, 255, 255, 0.95);
     border-radius: 10px;
@@ -44,7 +44,7 @@ body {
 .main-content {
     display: flex;
     grid-template-columns: 320px 1fr;
-    min-height: 600px;
+    min-height: 80vh;
 }
 
 .sidebar {
@@ -53,8 +53,8 @@ body {
     padding: 10px;
     overflow-y: auto;
     max-height: 120vh;
-    max-width: 280px;
-    min-width: 240px;
+    max-width: 240px;
+    min-width: 200px;
 }
 
 .field-group {
@@ -131,8 +131,9 @@ body {
     background: white;
     border: 2px dashed #dee2e6;
     border-radius: 10px;
-    min-height: 80px;
+    min-height: 10px;
     padding: 10px;
+    width: 100%;
     transition: all 0.3s ease;
 }
 
@@ -169,6 +170,7 @@ body {
 .content-area {
     padding: 10px;
     overflow: auto;
+    width: 100%;
 }
 
 .controls {
@@ -177,6 +179,9 @@ body {
     gap: 10px;
     flex-wrap: wrap;
     align-items: center;
+}
+#reset-catalog-filter:hover {
+ color: #dc3545;
 }
 
 .btn {
@@ -231,7 +236,6 @@ body {
 .tab-content {
     display: none;
     min-height: 600px;
-    height: 600px;
     flex-grow: 1;
     flex: 1;
 }
@@ -295,7 +299,6 @@ body {
     height: 600px;
     flex: 1;
     flex-grow: 1;
-    min-width: 940px;
 }
 
 .chart-controls {
@@ -388,7 +391,7 @@ body {
         border-right: none;
         border-bottom: 1px solid #e9ecef;
         max-height: none;
-        max-width: 270px;
+        max-width: 250px;
     }
 
     .controls {
@@ -548,6 +551,7 @@ body {
 }
 
 select {
+    min-width: 70px;
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;

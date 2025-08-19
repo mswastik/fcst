@@ -1,38 +1,8 @@
 <body>
-    <style>
-        .catalog-number-table {
-            width: 200px; /* Adjust width as needed */
-            margin-right: 0px; /* Space between table and content */
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            padding: 5px;
-            overflow-y: auto; /* Add scroll if list is long */
-            max-height: 80dvh; /* Adjust max height as needed */
-        }
-        .catalog-number-table h4 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            text-align: center;
-        }
-        #catalog-number-list {
-            font-size: 0.9em;
-        }
-        #catalog-number-list div {
-            padding: 5px;
-            cursor: pointer;
-            border-bottom: 1px solid #eee;
-        }
-        #catalog-number-list div:hover {
-            background-color: #e9e9e9;
-        }
-        #catalog-number-list div.selected {
-            background-color: #cceeff;
-            font-weight: bold;
-        }
-    </style>
     <div class="container">
         <div class="main-content">
-            <div class="sidebar">
+            <div class="sidebar sidebar-left" id="sidebar-left">
+                <button class="sidebar-toggle-button" onclick="toggleSidebar('sidebar-left')"><span class="toggle-icon"><<</span></button>
                 <div class="field-group">
                     <h4>Rows</h4>
                     <select class="field-list field-select" data-zone="rows" id="row-fields" multiple></select>
@@ -64,11 +34,12 @@
                     <div id="active-filters" class="active-filters"></div>
                 </div>
             </div>
-            <div class="sidebar">
-            <div class="field-group">
+            <div class="sidebar sidebar-right" id="sidebar-right">
+                <button class="sidebar-toggle-button" onclick="toggleSidebar('sidebar-right')"><span class="toggle-icon"><<</span></button>
+            <div class="field-group" style="max-width: 100%;">
                 <h4>Catalog Numbers</h4>
                 <a href="#" id="reset-catalog-filter" style="font-size: 1em; font-weight: 500; display: block; margin-bottom: 10px; margin-left:auto;">Reset Filter</a>
-            <div class="catalog-number-table">
+            <div class="catalog-number-table" style="min-width: 94%; max-width: 94%;">
                 <div id="catalog-number-list">
                     <!-- Catalog numbers will be listed here -->
                 </div></div>
@@ -109,7 +80,7 @@
                         </div>
                         <button class="btn small" onclick="updateChart()">Update Charts</button>
                     </div>
-                    <div id="chart-container" class="chart-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 20px;">
+                    <div id="chart-container" class="chart-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 10px;">
                         <canvas id="pivotChart" width="400" height="200"></canvas>
                     </div>
                 </div>
@@ -139,8 +110,47 @@
             </div>
         </div>
     </div>
-
+    
     <script>
+function toggleSidebar(sidebarId) {
+    const sidebar = document.getElementById(sidebarId);
+    const mainContent = document.querySelector('.main-content');
+    const button = sidebar.querySelector('.sidebar-toggle-button');
+    
+    // Toggle visibility class
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    sidebar.classList.toggle('collapsed', !isCollapsed);
+    
+    // Maintain original grid template if already set
+    if (!mainContent.style.gridTemplateColumns) {
+        mainContent.style.gridTemplateColumns = '200px 200px 1fr';
+    }
+    
+    let columns = mainContent.style.gridTemplateColumns.split(' ');
+    
+    // Ensure correct column structure
+    if (columns.length !== 3) {
+        columns = ['200px', '200px', '1fr'];
+    }
+    
+    // Adjust only the relevant sidebar width
+    if (sidebarId === 'sidebar-left') {
+        columns[0] = isCollapsed ? '200px' : '50px';
+    } else if (sidebarId === 'sidebar-right') {
+        columns[1] = isCollapsed ? '200px' : '50px';
+    }
+    
+    mainContent.style.gridTemplateColumns = columns.join(' ');
+    
+    // Update button icon
+    const icon = button.querySelector('.toggle-icon');
+    if (icon) {
+        icon.classList.toggle('closed', !isCollapsed);
+        // Both sidebars are on left, so use same icon direction
+        icon.textContent = isCollapsed ? '<<' : '>>';
+    }
+}
+
     function convertMultiSelectToAutocomplete() {
         // Find all select elements with multiple attribute
         const multiSelects = document.querySelectorAll('select[multiple]');
@@ -513,7 +523,9 @@
 
     function getUniqueValues(field) {
         const values = new Set();
-        originalData.forEach(row => {
+        // Use currentData (filtered data) instead of originalData to get unique values
+        // This ensures we only get values that exist after filtering
+        currentData.forEach(row => {
             if (row[field] !== undefined && row[field] !== null) {
                 values.add(String(row[field]));
             }
@@ -1110,37 +1122,48 @@
                 const config = createChartConfig(chartType, chartData);
                 currentCharts.push(new Chart(ctx, config));
             } else {
-                // Facet charts
-                const uniqueFacetValues = getUniqueValues(facetField).slice(0, maxCharts);
+                // Facet charts - but only create charts for facet values that have data after filtering
+                let uniqueFacetValues = [];
+                
+                // Get unique facet values only from the filtered data
+                if (currentData && currentData.length > 0) {
+                    uniqueFacetValues = [...new Set(currentData.map(row => row[facetField].toString()))];
+                }
+                
+                // Limit to max charts
+                uniqueFacetValues = uniqueFacetValues.slice(0, maxCharts);
+                
+                // Only create charts for facet values that have data
                 uniqueFacetValues.forEach(facetValue => {
                     const facetData = currentData.filter(row => row[facetField].toString() === facetValue);
-                    const pivotData = createPivotTable(facetData,
-                        getFieldsFromZone('rows'),
-                        getFieldsFromZone('columns'),
-                        getFieldsFromZone('values'));
-                    const chartDiv = document.createElement('div');
-                    chartDiv.className = 'facet-chart';
                     
-                    //const title = document.createElement('h4');
-                    //title.textContent = `${facetField}: ${facetValue}`;
-                    //chartDiv.appendChild(title);
-                    const chartWrapper = document.createElement('div');
-                    chartWrapper.style.width = '450px';
-                    chartWrapper.style.height = '400px';
-                    chartWrapper.style.position = 'relative';
-                    chartWrapper.style.marginBottom = '10px';
+                    // Only create chart if there's data for this facet value
+                    if (facetData.length > 0) {
+                        const pivotData = createPivotTable(facetData,
+                            getFieldsFromZone('rows'),
+                            getFieldsFromZone('columns'),
+                            getFieldsFromZone('values'));
+                        
+                        const chartDiv = document.createElement('div');
+                        chartDiv.className = 'facet-chart';
+                        
+                        const chartWrapper = document.createElement('div');
+                        chartWrapper.style.width = '450px';
+                        chartWrapper.style.height = '400px';
+                        chartWrapper.style.position = 'relative';
+                        chartWrapper.style.marginBottom = '10px';
 
-
-                    const canvas = document.createElement('canvas');
-                    chartWrapper.appendChild(canvas);
-                    chartDiv.appendChild(chartWrapper);
-                    
-                    chartContainer.appendChild(chartDiv);
-                    
-                    const ctx = canvas.getContext('2d');
-                    const chartData = prepareChartData(pivotData);
-                    const config = createChartConfig(chartType, chartData, `${facetField}: ${facetValue}`);
-                    currentCharts.push(new Chart(ctx, config));
+                        const canvas = document.createElement('canvas');
+                        chartWrapper.appendChild(canvas);
+                        chartDiv.appendChild(chartWrapper);
+                        
+                        chartContainer.appendChild(chartDiv);
+                        
+                        const ctx = canvas.getContext('2d');
+                        const chartData = prepareChartData(pivotData);
+                        const config = createChartConfig(chartType, chartData, `${facetField}: ${facetValue}`);
+                        currentCharts.push(new Chart(ctx, config));
+                    }
                 });
             }
         }
@@ -1298,12 +1321,31 @@
         function handleCatalogNumberClick(event) {
             const catalogNumber = event.target.getAttribute('data-catalog-number');
             const index = selectedCatalogNumbers.indexOf(catalogNumber);
+            const isCtrlPressed = event.ctrlKey || event.metaKey; // metaKey for Mac
+            
+            // If Ctrl/Cmd is not pressed, clear all selections first
+            if (!isCtrlPressed) {
+                // Clear all selections except the one being clicked
+                document.querySelectorAll('#catalog-number-list div.selected').forEach(item => {
+                    if (item !== event.target) {
+                        item.classList.remove('selected');
+                    }
+                });
+                selectedCatalogNumbers = [];
+            }
+            
+            // Toggle the clicked item
             if (index === -1) {
                 selectedCatalogNumbers.push(catalogNumber);
+                event.target.classList.add('selected');
             } else {
-                selectedCatalogNumbers.splice(index, 1);
+                // Only allow deselection if Ctrl/Cmd is pressed or if it's the only selected item
+                if (isCtrlPressed || selectedCatalogNumbers.length === 1) {
+                    selectedCatalogNumbers.splice(index, 1);
+                    event.target.classList.remove('selected');
+                }
             }
-            event.target.classList.toggle('selected');
+            
             filterData();
         }
         function resetCatalogNumberFilter() {
@@ -1523,7 +1565,16 @@
 
         // Expose the function globally for external calls (e.g., from parent window or other scripts)
         window.loadPivotData = loadDataProgrammatically;
-        loadDataProgrammatically({{df_json}})
+        
+        // Handle template data - this will be replaced by actual data when rendered
+         try {
+            const templateData = {{df_json}};
+            if (Array.isArray(templateData)) {
+                loadDataProgrammatically(templateData);
+            }
+        } catch (e) {
+            console.log('Template data not available, waiting for external data load');
+        }
         
         // Initialize the app
         document.addEventListener('DOMContentLoaded', function() {

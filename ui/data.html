@@ -1,7 +1,7 @@
 <body>
     <div class="container">
         <div class="main-content">
-            <div class="sidebar sidebar-left" id="sidebar-left">
+            <div class="sidebar" id="sidebar-left">
                 <button class="sidebar-toggle-button" onclick="toggleSidebar('sidebar-left')"><span class="toggle-icon"><<</span></button>
                 <div class="field-group">
                     <h4>Rows</h4>
@@ -34,7 +34,7 @@
                     <div id="active-filters" class="active-filters"></div>
                 </div>
             </div>
-            <div class="sidebar sidebar-right" id="sidebar-right">
+            <div class="sidebar" id="sidebar-right">
                 <button class="sidebar-toggle-button" onclick="toggleSidebar('sidebar-right')"><span class="toggle-icon"><<</span></button>
             <div class="field-group" style="max-width: 100%;">
                 <h4>Catalog Numbers</h4>
@@ -580,29 +580,30 @@ function toggleSidebar(sidebarId) {
     }
 
     function filterData() {
-        // First apply active filters to originalData -> filteredData
-        filteredData = [...originalData];
-        activeFilters.forEach(filter => {
-            filteredData = filteredData.filter(row => {
-                const rowValue = String(row[filter.field]).toLowerCase();
-                if (Array.isArray(filter.values)) {
-                    return filter.values.some(val => rowValue.includes(String(val).toLowerCase()));
-                } else {
-                    return rowValue.includes(String(filter.values).toLowerCase());
-                }
-            });
+    // Use a single pass through the data instead of multiple filter operations
+    filteredData = originalData.filter(row => {
+        // Check all filters at once
+        return activeFilters.every(filter => {
+            const rowValue = String(row[filter.field] || '').toLowerCase();
+            if (Array.isArray(filter.values)) {
+                return filter.values.some(val => rowValue.includes(String(val).toLowerCase()));
+            } else {
+                return rowValue.includes(String(filter.values).toLowerCase());
+            }
         });
-        
-        // Then apply catalog number selection to filteredData -> currentData
+    });
+    
+    // Then apply catalog number selection to filteredData -> currentData
+    if (selectedCatalogNumbers.length > 0) {
+        currentData = filteredData.filter(row => selectedCatalogNumbers.includes(row.CatalogNumber));
+    } else {
         currentData = [...filteredData];
-        if (selectedCatalogNumbers.length > 0) {
-            currentData = currentData.filter(row => selectedCatalogNumbers.includes(row.CatalogNumber));
-        }
-
-        updateRawDataView();
-        generatePivot();
-        renderCatalogNumberTable(); // Update catalog number list using filteredData
     }
+    
+    updateRawDataView();
+    generatePivot();
+    renderCatalogNumberTable();
+}
 
     function renderActiveFilters() {
         const activeFiltersDiv = document.getElementById('active-filters');
@@ -628,6 +629,12 @@ function toggleSidebar(sidebarId) {
         renderActiveFilters();
     }
 
+    let rawDataCurrentPage = 1;
+    function changePage(page) {
+        rawDataCurrentPage = page;
+        updateRawDataView();
+    }
+
     function updateRawDataView() {
         const rawOutput = document.getElementById('raw-data-output');
         
@@ -641,6 +648,13 @@ function toggleSidebar(sidebarId) {
             return;
         }
 
+        // Add pagination variables
+        const rowsPerPage = 100;
+        const currentPage = rawDataCurrentPage || 1;
+        const totalPages = Math.ceil(currentData.length / rowsPerPage);
+        const startIndex = (currentPage - 1) * rowsPerPage;
+        const endIndex = Math.min(startIndex + rowsPerPage, currentData.length);
+
         const fields = Object.keys(currentData[0]);
         let html = '<table>';
         
@@ -650,7 +664,7 @@ function toggleSidebar(sidebarId) {
         });
         html += '</tr>';
         
-        const displayData = currentData.slice(0, 100);
+        const displayData = currentData.slice(startIndex, endIndex);
         displayData.forEach(row => {
             html += '<tr>';
             fields.forEach(field => {
@@ -661,11 +675,18 @@ function toggleSidebar(sidebarId) {
             html += '</tr>';
         });
         
-        if (currentData.length > 100) {
-            html += `<tr><td colspan="${fields.length}" style="text-align: center; font-style: italic; color: #666;">Showing first 100 of ${currentData.length} rows</td></tr>`;
-        }
-        
         html += '</table>';
+        
+        // Add pagination controls
+        html += `<div class="pagination">
+            <span>Showing ${startIndex + 1}-${endIndex} of ${currentData.length} rows</span>
+            <div class="pagination-controls">
+                <button ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">Previous</button>
+                <span>Page ${currentPage} of ${totalPages}</span>
+                <button ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">Next</button>
+            </div>
+        </div>`;
+        
         rawOutput.innerHTML = html;
     }
 
@@ -1508,59 +1529,76 @@ function toggleSidebar(sidebarId) {
                 alert('Invalid data provided. Please provide an array of objects.');
                 return;
             }
-            originalData = data; // Store original data
-            filteredData = [...originalData]; // Initialize filteredData with original
-            currentData = [...originalData];  // Initialize currentData with original
-            updateAvailableFields();
-            updateRawDataView();
-            clearAll(); // Clear existing pivot/charts
-            clearFilters(); // Clear any active filters
-            // Update views
-            updateRawDataView();
-            renderCatalogNumberTable(); // Render the CatalogNumber table
-            // Optionally, generate pivot table immediately after loading data
             
-            // Set default selections
-            const rowFieldsSelect = document.getElementById('row-fields');
-            const columnFieldsSelect = document.getElementById('column-fields');
-            const valueFieldsSelect = document.getElementById('value-fields');
+            // Show loading indicator
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.className = 'loading-indicator';
+            loadingIndicator.innerHTML = '<p>Loading data...</p><div class="progress-bar"><div class="progress"></div></div>';
+            document.body.appendChild(loadingIndicator);
+            
+            // Process data in chunks to avoid UI freezing
+            originalData = data;
+            
+            // Use setTimeout to allow UI to update before processing
+            setTimeout(() => {
+                // Process in background
+                filteredData = [...originalData];
+                currentData = [...originalData];
+                
+                // Update UI
+                updateAvailableFields();
+                clearAll();
+                clearFilters();
+                
+                // Remove loading indicator
+                document.body.removeChild(loadingIndicator);
+                
+                // Update views
+                updateRawDataView();
+                renderCatalogNumberTable();
+                
+                // Set default selections
+                const rowFieldsSelect = document.getElementById('row-fields');
+                const columnFieldsSelect = document.getElementById('column-fields');
+                const valueFieldsSelect = document.getElementById('value-fields');
 
-            // Clear existing selections first
-            Array.from(rowFieldsSelect.options).forEach(option => option.selected = false);
-            const resetLink = document.getElementById('reset-catalog-filter');
-            if (resetLink) {
-                resetLink.addEventListener('click', function(e) {
-                    e.preventDefault(); // Prevent default link behavior
-                    resetCatalogNumberFilter();
+                // Clear existing selections first
+                Array.from(rowFieldsSelect.options).forEach(option => option.selected = false);
+                const resetLink = document.getElementById('reset-catalog-filter');
+                if (resetLink) {
+                    resetLink.addEventListener('click', function(e) {
+                        e.preventDefault(); // Prevent default link behavior
+                        resetCatalogNumberFilter();
+                    });
+                }
+                Array.from(columnFieldsSelect.options).forEach(option => option.selected = false);
+                Array.from(valueFieldsSelect.options).forEach(option => option.selected = false);
+
+                // Select default row field
+                const defaultRowField = 'SALES_DATE';
+                const rowOption = Array.from(rowFieldsSelect.options).find(opt => opt.value === defaultRowField);
+                if (rowOption) {
+                    rowOption.selected = true;
+                }
+
+                // Select default value fields
+                const defaultValueFields = ['`Act Orders Rev', 'NHITS', '`Fcst Stat Final Rev'];
+                defaultValueFields.forEach(field => {
+                    const valueOption = Array.from(valueFieldsSelect.options).find(opt => opt.value === field);
+                    if (valueOption) {
+                        valueOption.selected = true;
+                    }
                 });
-            }
-            Array.from(columnFieldsSelect.options).forEach(option => option.selected = false);
-            Array.from(valueFieldsSelect.options).forEach(option => option.selected = false);
 
-            // Select default row field
-            const defaultRowField = 'SALES_DATE';
-            const rowOption = Array.from(rowFieldsSelect.options).find(opt => opt.value === defaultRowField);
-            if (rowOption) {
-                rowOption.selected = true;
-            }
-
-            // Select default value fields
-            const defaultValueFields = ['`Act Orders Rev', 'NHITS', '`Fcst Stat Final Rev'];
-            defaultValueFields.forEach(field => {
-                const valueOption = Array.from(valueFieldsSelect.options).find(opt => opt.value === field);
-                if (valueOption) {
-                    valueOption.selected = true;
-                }
-            });
-
-            // Trigger change events to update the custom autocomplete display
-            [rowFieldsSelect, columnFieldsSelect, valueFieldsSelect].forEach(s => {
-                if (s._updateCustomDisplay) {
-                    s._updateCustomDisplay();
-                }
-            });
-            
-            generatePivot(); // Generate pivot table with default values
+                // Trigger change events to update the custom autocomplete display
+                [rowFieldsSelect, columnFieldsSelect, valueFieldsSelect].forEach(s => {
+                    if (s._updateCustomDisplay) {
+                        s._updateCustomDisplay();
+                    }
+                });
+                
+                generatePivot(); // Generate pivot table with default values
+            }, 100);
         }
 
         // Expose the function globally for external calls (e.g., from parent window or other scripts)

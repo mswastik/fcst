@@ -1,7 +1,7 @@
 from nicegui import ui,run,app
 from data_model import get_filter_options, filtered_products, filtered_models, generate_sample_data, filtered_df
 from data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
-from sql import sqlpd,query_st
+#from sql import sqlpd,query_st
 from ui.charts import update_charts
 import os
 #import asyncio
@@ -126,9 +126,9 @@ def create_dashboard():
             dwn.sp = True
             timer.activate()
             try:
-                row_count = await run.io_bound(query_st, dwn.lhv, dwn.lvv, dwn.phv, dwn.pvv, int(dwn.pmv), int(dwn.fmv))
+                #row_count = await run.io_bound(query_st, dwn.lhv, dwn.lvv, dwn.phv, dwn.pvv, int(dwn.pmv), int(dwn.fmv))
                 dwn.row_lab = f"Downloading {row_count} rows..."
-                await run.io_bound(sqlpd, dwn.lhv, dwn.lvv, dwn.phv, dwn.pvv,int(dwn.pmv),int(dwn.fmv))
+                #await run.io_bound(sqlpd, dwn.lhv, dwn.lvv, dwn.phv, dwn.pvv,int(dwn.pmv),int(dwn.fmv))
                 ui.notify('Download complete!', type='success')
             except Exception as e:
                 ui.notify(f'Download failed: {e}', type='error')
@@ -199,7 +199,9 @@ def create_dashboard():
             full_df = pl.read_json(temp_file,infer_schema_length=9000)
             full_df = full_df.with_columns(pl.col('SALES_DATE').str.to_datetime())
             full_df = full_df.with_columns(pl.col('`Act Orders Rev').cast(pl.Float32))
-
+            if 'cluster' in full_df.columns:
+                full_df=full_df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
+                full_df = full_df.with_columns(pl.col('cluster').cast(pl.Utf8))
             async def filter_and_load_data(start_date, end_date):
                 #full_df = app.storage.user['dwn_df_json']
                 
@@ -323,3 +325,9 @@ def raw_data_page():
      ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>')
      ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>") 
      ui.add_body_html(f"{(Path(__file__).parent / 'data.html').read_text()}".replace('{{df_json}}', df_json))
+
+@ui.page("/llms")
+async def llm():
+    ui.chat_message('Hello User!',name='Agent',stamp='now')
+    with ui.row():
+        ui.input(label='User',placeholder='Type your message...')

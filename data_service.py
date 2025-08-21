@@ -157,7 +157,7 @@ def create_enhanced_clusters(df, file_path):
     
     # Save results
     print(df)
-    df=df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id")).describe()
+    df=df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
     df=df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
     df.write_parquet(f"data/{file_path}")
     return df
@@ -178,7 +178,8 @@ def create_ensemble_models(df, file_path):
     
     # Realistic horizon based on available data
     available_months = len(df_fr['ds'].unique())
-    horizon = min(24, available_months)  # Max 2 years or half of available data
+    #horizon = min(24, available_months)  # Max 2 years or half of available data
+    horizon = 60
     input_size = min(horizon, available_months)
     #input_size = available_months
     
@@ -202,8 +203,7 @@ def create_ensemble_models(df, file_path):
         windows_batch_size = max(1, min(16, n_series // 2))
         
         # Neural models with fixed dimensions
-        neural_models = [
-            NHITS(
+        nhits = NHITS(
                 h=horizon,
                 input_size=input_size,
                 max_steps=180,
@@ -224,8 +224,8 @@ def create_ensemble_models(df, file_path):
                 start_padding_enabled=True,
                 learning_rate=1e-3,
                 val_check_steps=25,
-            ),
-            LSTM(
+            )
+        lstm = LSTM(
                 h=horizon,
                 input_size=input_size,
                 max_steps=180,
@@ -239,7 +239,6 @@ def create_ensemble_models(df, file_path):
                 random_seed=42,
                 learning_rate=1e-3,
             )
-        ]
         
         # Statistical models
         stat_models = [
@@ -250,7 +249,8 @@ def create_ensemble_models(df, file_path):
         
         #try:
         # Fit neural models
-        nf = NeuralForecast(models=neural_models, freq='1mo')
+        nf = NeuralForecast(models=[nhits,lstm], freq='1mo')
+
         nf.fit(df=cluster_data.fill_nan(0).fill_null(0))
         neural_forecasts = nf.predict()
         
@@ -333,10 +333,8 @@ def run_enhanced_forecasting_pipeline(df, file_path):
         # Step 1: Enhanced clustering
         #df_clustered = create_enhanced_clusters(df, file_path)
         df_clustered = create_clusters(df, file_path)
-
     else:
         df_clustered = df.clone()
-    
     # Step 2: Create ensemble models
     forecasts = create_ensemble_models(df_clustered, file_path)
     forecasts = forecasts.rename({'ds':'SALES_DATE'})
@@ -419,6 +417,8 @@ def apply_filters(filters):
 def create_clusters(df, file_path):
     if 'unique_id' not in df.columns:
         df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
+    df=df.drop('cluster',strict=False)
+    df=df.drop('cluster_right',strict=False)
     df1= df.filter(pl.col('SALES_DATE')<=datetime.today()-relativedelta(months=1))
     df1 = df1[['unique_id', 'SALES_DATE', '`Act Orders Rev']]
     df1=df1.with_columns(pl.col('`Act Orders Rev').cast(pl.Float32).alias('`Act Orders Rev'))
@@ -428,11 +428,9 @@ def create_clusters(df, file_path):
     df1 = df1.with_columns(pl.when(pl.col('ynorm').is_infinite()).then(0).otherwise(pl.col('ynorm')).alias('ynorm'))
     df1=df1.pivot(index='unique_id',on='SALES_DATE',values='ynorm',aggregate_function='sum')
     bi=Birch(n_clusters=6).fit(df1[:,1:])
-    df1=df1.drop('cluster',strict=False)
-    df1=df1.drop('cluster_right',strict=False)
     df1=df1.with_columns(cluster=bi.labels_)
     df1=df1['unique_id','cluster']
-    df=df.join(df1,on='unique_id',coalesce=True)
+    df=df.join(df1,on='unique_id',how='left',coalesce=True)
     df=df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
     df=df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
     df.write_parquet(f"data/{file_path}")

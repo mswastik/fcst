@@ -34,7 +34,7 @@ def main():
     # Create dashboard UI
     
     # Run the app
-    ui.run(reload=False,title="ML Integration",reconnect_timeout=7000, storage_secret='my_secret_key', port=8081)
+    ui.run(reload=False,title="ML Integration",reconnect_timeout=7000, storage_secret='my_secret_key', host="0.0.0.0", port=8000)
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()

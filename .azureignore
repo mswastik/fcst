@@ -24,3 +24,4 @@ archive/charts.html
 archive/clustering data.pbix
 llms/*
 .roo/*
+sql.py

@@ -5,3 +5,7 @@ neuralforecast
 scikit-learn
 pandas
 pyodbc
+mlforecast
+statsforecast
+lightgbm
+xgboost

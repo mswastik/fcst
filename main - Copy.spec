@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:\\Users\\smishra14\\setup\\Miniforge\\envs\\fcst\\Lib\\site-packages\\nicegui', 'nicegui')],
+    datas=[('C:\\Users\\smishra14\\setup\\miniconda\\envs\\fcst1\\Lib\\site-packages\\nicegui', 'nicegui')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

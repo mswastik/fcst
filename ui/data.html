@@ -1602,7 +1602,7 @@ function toggleSidebar(sidebarId) {
         }
 
         // Expose the function globally for external calls (e.g., from parent window or other scripts)
-        window.loadPivotData = loadDataProgrammatically;
+        //window.loadPivotData = loadDataProgrammatically;
         
         // Handle template data - this will be replaced by actual data when rendered
          try {
@@ -1617,7 +1617,7 @@ function toggleSidebar(sidebarId) {
         // Initialize the app
         document.addEventListener('DOMContentLoaded', function() {
             // Instead of loading data directly, we'll wait for the server to call window.loadPivotData
-            updateRawDataView();
+            //updateRawDataView();
             // Ensure conversion happens after the DOM is ready and initial data might be loaded
             convertMultiSelectToAutocomplete();
         });

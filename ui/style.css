@@ -51,7 +51,7 @@ body {
 .sidebar {
     background-color: #f4f4f4;
     border-right: 1px solid #eee;
-    padding: 10px;
+    padding: 5px;
     overflow-y: auto;
     transition: width 0.3s ease-in-out, min-width 0.3s ease-in-out;
     min-width: 250px;
@@ -60,7 +60,6 @@ body {
     flex-direction: column;
     max-height: 99dvh;
     position: sticky;
-    top: 0;
     width: 200px;
 }
 
@@ -80,7 +79,7 @@ body {
     background: #667eea;
     color: white;
     border: none;
-    padding: 5px 4px;
+    padding: 2px 2px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;

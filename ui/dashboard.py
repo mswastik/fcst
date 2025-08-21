@@ -8,6 +8,7 @@ import os
 import polars as pl
 #import json
 #import io
+from datetime import datetime, timedelta
 
 if not os.path.exists('data/'):
     os.makedirs('data/')
@@ -61,7 +62,7 @@ def create_dashboard():
                 f1=filtered_df.with_columns(pl.col('SALES_DATE').dt.date())
 
                 async def on_row_click_handler(e):
-                    print(e)
+                    #print(e)
                     catalog_number = e.args[1]['CatalogNumber'] # Assuming 'CatalogNumber' is in the row data
                     filter_state['product1'] = 'CatalogNumber'
                     filter_state['product2'] = catalog_number
@@ -107,6 +108,7 @@ def create_dashboard():
         if ((filter_state.get('location2')) and (filter_state.get('location1'))) or ((filter_state.get('product2')) and (filter_state.get('product1'))):
             filtered_df = apply_filters(filter_state)
             await update_ui(filtered_df['filtered_df'])
+            app.storage.user['dwn_df_json'] = filtered_df['fdf']
         try:
             filtered_df=filtered_df['filtered_df']
         except: pass
@@ -182,6 +184,72 @@ def create_dashboard():
             #ui.button('Download Data', on_click=lambda: ui.notify(download_data_action(), type='info')).classes('ml-auto')
             ui.button('Get Data', on_click=on_download).classes('ml-auto')
         
+        # Date filter dialog
+        def diag(e):
+            # Instead of reading directly from storage, save to a temporary file first
+            import tempfile
+            # Create a temporary file
+            temp_dir = tempfile.gettempdir()
+            temp_file = os.path.join(temp_dir, 'temp_data.json')
+            
+            # Write the JSON data to the temporary file
+            with open(temp_file, 'w') as f:
+                f.write(app.storage.user['dwn_df_json'])
+            # Read from the file instead of directly from memory
+            full_df = pl.read_json(temp_file,infer_schema_length=9000)
+            full_df = full_df.with_columns(pl.col('SALES_DATE').str.to_datetime())
+            full_df = full_df.with_columns(pl.col('`Act Orders Rev').cast(pl.Float32))
+
+            async def filter_and_load_data(start_date, end_date):
+                #full_df = app.storage.user['dwn_df_json']
+                
+                try:
+                    ui.notify("Filtering data...", type='info')
+                    
+                    start_datetime = datetime.strptime(str(start_date), '%Y-%m-%d')
+                    end_datetime = datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=1)
+                    #print(type(start_datetime),start_datetime)
+                    filtered_df = full_df.filter(
+                        (pl.col('SALES_DATE') >= start_datetime) & 
+                        (pl.col('SALES_DATE') < end_datetime)
+                    )
+                    if filtered_df.height == 0:
+                        ui.notify(f"No data found between {start_date} and {end_date}", type='warning')
+                        return
+                    
+                    filtered_json = filtered_df.write_json()
+                    date_dialog.close()
+                    app.storage.user['dwn_df_json']=filtered_json
+
+                    ui.navigate.to('/raw_data', new_tab=True)
+                    ui.notify(f"Successfully loaded {filtered_df.height} records", type='positive')
+            
+                except Exception as e:
+                    ui.notify(f"Error: {str(e)}", type='negative')
+            if 'SALES_DATE' in full_df.columns:
+                #full_df = full_df.with_columns(pl.col('SALES_DATE').str.to_datetime())
+                min_date = full_df['SALES_DATE'].min().date()
+                max_date = full_df['SALES_DATE'].max().date()
+            else:
+                min_date = (datetime.now() - timedelta(days=365)).date()
+                max_date = datetime.now().date()
+            with ui.dialog() as date_dialog, ui.card().style('min-width: 700px'):
+                ui.label('Filter Data by Date Range').classes('text-h6 mb-4')
+                ui.label(f'Data available: {min_date} to {max_date}').classes('text-caption mb-4')
+                
+                with ui.row().classes('w-full gap-4'):
+                    start_date_input = ui.date(value=min_date)
+                    end_date_input = ui.date(value=max_date)
+            
+                with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                    ui.button('Cancel', on_click=lambda: ui.navigate.back()).props('flat')
+                    ui.button('Load Data', 
+                            on_click=lambda: filter_and_load_data(
+                                start_date_input.value, 
+                                end_date_input.value
+                            )).props('color=primary')
+            date_dialog.open()
+        
         # Main content area
         with ui.row().classes('w-full mt-2 ml-0 gap-2'):
             # Models list
@@ -214,7 +282,7 @@ def create_dashboard():
                     dwn.df = await run.cpu_bound(create_models_action, cd, filter_state['data_files'])'''
                 n.message="Running!! "
                 n.spinner =True
-                dwn.df = await run.cpu_bound(run_enhanced_forecasting_pipeline, dwn.df, filter_state['data_files'])
+                dwn.df,_ = await run.cpu_bound(run_enhanced_forecasting_pipeline, dwn.df, filter_state['data_files'])
                 n.message = 'Done!'
                 n.spinner = False
                 n.dismiss()
@@ -231,7 +299,9 @@ def create_dashboard():
                 ui.button('Segmentation', on_click=run_cluster).classes('bg-green-100')
                 ui.button('Generate Forecast', on_click=run_create_models).classes('bg-green-100')
                 ui.button('Change FC', on_click=lambda: ui.notify(change_fc_action(), type='info')).classes('bg-green-100')
-                ui.button('View', on_click=lambda: ui.navigate.to('/raw_data', new_tab=True))
+                #ui.button('View', on_click=lambda: ui.navigate.to('/raw_data', new_tab=True))
+                ui.button('View', on_click=diag).classes('bg-green-100')
+
         
         # Bottom details panel
         with ui.card().classes('w-full m-0 p-0 h-full'):

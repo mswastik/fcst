@@ -72,7 +72,7 @@ def get_filter_options(prod=products[0],loc=locations[0]):
 
 def get_chart_data(type,filtered_df):
     """Get data formatted for charts"""
-    print(filtered_df)
+    #print(filtered_df)
     if len(filtered_df) == 0:
         return None
     filtered_df=pl.DataFrame(filtered_df)

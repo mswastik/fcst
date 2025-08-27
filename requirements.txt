@@ -9,3 +9,6 @@ mlforecast
 statsforecast
 lightgbm
 xgboost
+databricks-sdk
+databricks-connect==16.1.6
+databricks-sql-connector

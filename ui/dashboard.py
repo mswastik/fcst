@@ -328,6 +328,307 @@ def raw_data_page():
 
 @ui.page("/llms")
 async def llm():
-    ui.chat_message('Hello User!',name='Agent',stamp='now')
-    with ui.row():
-        ui.input(label='User',placeholder='Type your message...')
+    from databricks.connect import DatabricksSession
+    from databricks.sdk import WorkspaceClient
+    from databricks import sql
+    from databricks.sdk.core import Config
+    from datetime import datetime, timedelta
+    
+    num_periods = 36
+    end_date = '2025-08-01'
+    end_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+    start_date = end_date - timedelta(days=(num_periods - 1) *30)
+    start_date = start_date.replace(day=1)
+    start_date = start_date.strftime('%Y-%m-%d')
+    
+    query = f"""
+        SELECT *
+        FROM
+        (
+            SELECT
+                SellingDivision AS SellingDivision,
+                COUNTRY_GROUP AS Area,
+                StrykerGroupRegion AS StrykerGroupRegion,
+                Region,
+                Country,
+                p.CatalogNumber,
+                p.Business_Sector AS BusinessSector,
+                p.Business_Unit AS BusinessUnit,
+                p.Franchise,
+                p.Product_Line AS ProductLine,
+                p.IBP_Level_5 AS IBP_Level_5,
+                p.IBP_Level_6 AS IBP_Level_6,
+                p.IBP_Level_7 AS IBP_Level_7,
+                SALES_DATE,
+                p.xx_uom_conversion AS UOM,
+                s.NPI_Flag AS NPI_Flag,
+                p.PackContent AS PackContent,
+
+                SUM(L0_ASP_Final_Rev) AS L0_ASP_Final_Rev,
+                SUM(Act_Orders_Rev) AS Act_Orders_Rev,
+                SUM(Act_Orders_Rev_Val) AS Act_Orders_Rev_Val,
+                SUM(s.L2_DF_Final_Rev) AS L2_DF_Final_Rev,
+                SUM(s.L1_DF_Final_Rev) AS L1_DF_Final_Rev,
+                SUM(s.L0_DF_Final_Rev) AS L0_DF_Final_Rev,
+                SUM(s.L2_Stat_Final_Rev) AS L2_Stat_Final_Rev,
+                SUM(Fcst_DF_Final_Rev) AS Fcst_DF_Final_Rev,
+                SUM(Fcst_Stat_Final_Rev) AS Fcst_Stat_Final_Rev,
+                SUM(Fcst_Stat_Prelim_Rev) AS Fcst_Stat_Prelim_Rev,
+                SUM(Fcst_DF_Final_Rev_Val) AS Fcst_DF_Final_Rev_Val,
+                SUM(Act_Orders_Final_Rev) AS Act_Orders_Final_Rev
+
+            FROM Envision.Demantra_CLD_Fact_Sales s
+
+            JOIN Envision.DIM_Demantra_CLD_DemantraLocation l
+                ON s.Location_sKey = l.Location_skey
+
+            JOIN Envision.Dim_DEMANTRA_CLD_MDP_Matrix m
+                ON s.MDP_Key = m.MDP_Key
+
+            JOIN Envision.DIM_Demantra_CLD_products p
+                ON s.item_skey = p.demantra_item_skey
+                AND p.[Current] = 'True'
+
+            WHERE s.SALES_DATE BETWEEN '2025-08-01' AND '2025-09-01'
+            AND [Country] in ('INDIA') 
+
+            GROUP BY
+                SellingDivision,
+                COUNTRY_GROUP,
+                StrykerGroupRegion,
+                Region,
+                Country,
+                p.Business_Sector,
+                p.Business_Unit,
+                p.Franchise,
+                p.IBP_Level_5,
+                p.IBP_Level_6,
+                p.IBP_Level_7,
+                p.Product_Line,
+                SALES_DATE,
+                p.CatalogNumber,
+                p.Itemid,
+                p.xx_uom_conversion,
+                s.NPI_Flag,
+                p.PackContent
+        ) final
+        """
+    '''
+    async def query(e):
+        connection_string=f"Driver={{ODBC Driver 18 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
+        reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string,parameters=fran)
+        df1=pl.DataFrame()
+        df=df.filter(pl.col('SALES_DATE')<=datetime(today.year,today.month,1)-relativedelta(months=3))
+        for batch in reader:
+            df1=pl.concat([df1,pl.from_arrow(batch)])
+        df1=df1.with_columns(pl.col('SALES_DATE').cast(pl.Datetime).dt.cast_time_unit('us'))
+    return query_fact_sales
+    '''
+    '''
+    print(spark.table("hive_metastore.da.Fact_Sales1").limit(100))
+    http_path = f"/sql/1.0/warehouses/62d47c983bb6df91"
+    
+    config = Config(
+        host=os.getenv("DATABRICKS_HOST"),
+        client_id=os.getenv("DATABRICKS_CLIENT_ID"),
+        client_secret=os.getenv("DATABRICKS_CLIENT_SECRET")
+        )
+
+
+    w = WorkspaceClient(config=config)
+    #cfg = Config()
+    #print(cfg)
+    clusters = w.clusters.list()
+    for cluster in clusters:
+        print(f"Cluster: {cluster.cluster_name}, ID: {cluster.cluster_id}")
+    print("Available warehouses:")
+    for wh in w.warehouses.list():
+        print(f"- {wh.name} ({wh.id})")
+    
+    conn = sql.connect(server_hostname=config.host,
+        #http_path="http://adb-677543366313482.2.azuredatabricks.net",
+        http_path=http_path,
+        credentials_provider=lambda: config.authenticate,)
+
+    query = "SELECT * FROM hive_metastore.da.Fact_Sales1 LIMIT 100"
+    print(query)
+    with conn.cursor() as cursor:
+        cursor.execute(query)
+        df = pl.from_arrow(cursor.fetchall_arrow())
+        #print(df.head())
+    conn.close()
+    
+    #spark.table("hive_metastore.da.Fact_Sales").limit(100)
+    spark = DatabricksSession.builder.clusterId('0805-063508-emq3q7q8').getOrCreate()
+    #spark = DatabricksSession.builder.clusterId(os.environ['DB_CLUSTER_ID']).getOrCreate()
+    #print(spark.table("hive_metastore.da.Fact_Sales1").limit(100))
+    #df = spark.read.table("samples.nyctaxi.trips")
+      # cfg with auth for Service Principal
+    sp_cfg = sdk.config.Config()
+    # request handler
+    async def query(user, request: gr.Request):
+        # user's email
+        email = request.headers.get("X-Forwarded-Email")
+        # queries the database (or cache) to fetch user session using the SP
+        user_session = get_user_session(sp_cfg, email)
+        # user's access token
+        user_token = request.headers.get("X-Forwarded-Access-Token")
+        # queries the SQL Warehouse on behalf of the end-user
+        result = query_warehouse(user_token)
+        # save stats in user session
+        save_user_session(sp_cfg, email)
+    return result
+    '''
+
+@ui.page("/agent")
+async def agent():
+    from crewai import Agent, LLM, Crew, Task
+    from ddgs import DDGS
+    from crewai_tools import ScrapeWebsiteTool, WebsiteSearchTool
+    from bs4 import BeautifulSoup
+    import requests
+    #from ipex_llm.transformers import AutoModelForCausalLM
+    #from transformers import AutoTokenizer
+    from openai import OpenAI
+
+    #tokenizer = AutoTokenizer.from_pretrained("unsloth/Qwen3-1.7B-unsloth-bnb-4bit")
+    #model_path = "C:\\Users\\smishra14\\setup\\repos\\fcst\\llms\\Qwen3-1.7B-UD-Q4_K_XL.gguf"
+
+    client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="sk-no-key-required"  # dummy key, some servers ignore it
+        )
+    
+    '''
+    #llm=Llama(model_path=model_path,n_ctx=6148)
+    model = AutoModelForCausalLM.load_low_bit(
+            model_path,
+            load_in_low_bit="gguf",   # detect quantization automatically
+            optimize_model=True,
+        )
+
+    def local_llm(prompt):
+        inputs = tokenizer.encode(prompt, return_tensors="pt")
+        outputs = model.generate(**inputs, max_new_tokens=4000)
+        return tokenizer.decode(outputs[0], skip_special_tokens=True)
+    
+    llm = LLM(
+        model="openai/qwen3",  # Changed to local model identifier
+        temperature=0.7,
+        base_url="http://localhost:8080/v1",  # Assuming this is your llama.cpp server
+        api_key="empty"  # Empty string to prevent OPENAI_API_KEY lookup
+    )
+    
+    # Create agent without external tools
+    agent = Agent(
+        role='Market Research Expert',
+        goal='Provide top brands and latest information based on user query',
+        backstory="An AI assistant with custom LLM settings.",
+        tools=[ScrapeWebsiteTool()],  # No external tools needed
+        llm=llm
+    )
+    '''
+    def search_web(query, max_results=3):
+        with DDGS() as ddgs:
+            return [r['href'] for r in ddgs.text(query, max_results=max_results)]
+
+    def scrape_page(url):
+        try:
+            html = requests.get(url, timeout=5).text
+            soup = BeautifulSoup(html, "html.parser")
+            print(" ".join([p.get_text() for p in soup.find_all("p")])[:2000])
+            return " ".join([p.get_text() for p in soup.find_all("p")])[:2000]  # limit size
+        except:
+            return ""
+        
+    def summarize(text, prompt="Summarize:"):
+        response = client.chat.completions.create(
+        model="gemma3n",  # use whatever name your server registered
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text}
+        ],
+        max_tokens=400
+        )
+        return response.choices[0].message.content
+
+    def run_agent(product, region):
+        queries = [
+            f"{product} market growth potential for next 5 years in {region}",
+            f"{product} competitors of Stryker in {region}"
+        ]
+        results = {}
+        for q in queries:
+            urls = search_web(q)
+            scraped = [scrape_page(u) for u in urls]
+            combined_text = " ".join(scraped)
+            results[q] = summarize(combined_text, prompt=f"Give 200 word insights for query: {q}")
+        return results
+    
+    with ui.column().classes('p-4 items-center'):
+        ui.label("Medical Device Market Research Agent").classes("text-2xl font-bold")
+        product_input = ui.input("Enter Product").classes("w-96")
+        region_input = ui.input("Enter Region").classes("w-96")
+        output_area = ui.column().classes("w-full p-4 bg-gray-100 rounded")
+
+        def run():
+            output_area.clear()
+            results = run_agent(product_input.value, region_input.value)
+            print(results)
+            for q, ans in results.items():
+                with output_area:
+                    ui.label(q).classes("text-xl font-semibold mt-4")
+                    ui.markdown(ans)
+
+        ui.button("Search", on_click=run).classes("mt-4")
+
+    '''
+    # Chat interface
+    chat_container = ui.column().classes('w-full')
+    
+    async def handle_query(query: str):
+        # Add user message to chat
+        print(query)
+        user_input.clear()
+        with chat_container:
+            ui.chat_message(query, name='User', stamp=datetime.now().strftime('%H:%M'),sent=True).classes('ml-auto mr-10')
+            
+        
+        # Use DDGS directly for search
+        results = DDGS().text(query, max_results=1)
+        print(results[0])
+        
+        # Create task with DDGS results
+        task = Task(
+            description=f"Research and provide the latest information, products, and features.",
+            expected_output="A detailed summary of the information with all available details.",
+            agent=agent
+        )
+        
+        crew = Crew(
+            agents=[agent],
+            tasks=[task],
+            verbose=True
+        )
+        
+        # Run crew with direct DDGS results
+        result = crew.kickoff(inputs=results[0])
+        
+        # Add agent response to chat
+        with chat_container:
+            ui.chat_message(result.raw, name='Agent', stamp=datetime.now().strftime('%H:%M')).classes('mr-auto ml-10')
+    
+    # Input field with send button
+    with ui.row().classes('w-full mt-auto h-32 items-end gap-2'):
+        user_input = ui.input(
+            label='Your message',
+            placeholder='Type your query here...'
+        ).classes('w-3/4 mx-auto mt-auto').on('keydown.enter', lambda e: handle_query(e.sender.value))
+        
+        ui.button(
+            'Send',
+            on_click=lambda: handle_query(user_input.value),
+            color='primary'
+        ).classes('ml-0 mr-auto mt-auto').props('flat')
+    '''

@@ -15,3 +15,23 @@ env:
     value: "0.0.0.0"
   - name: NICEGUI_PORT
     value: "8000"
+  - name: "DB_CLUSTER_NAME"
+    value: "demand_analytics_compute"
+  - name: "DB_CLUSTER_ID"
+    value: "0805-063508-emq3q7q8"
+  
+resources:
+  apps:
+    mlintegration:
+      name: mlintegration
+      source_code_path: ./src
+      permissions:
+        - principal_name: "1862f1db-bc27-4558-8299-d83891abaa90"
+          permission_level: "CAN_USE"
+      config:
+        compute:
+          - name: "demand_analytics_compute"
+            compute_id: "0805-063508-emq3q7q8"
+            permissions:
+              - principal_name: "1862f1db-bc27-4558-8299-d83891abaa90"
+                permission_level: "CAN_ATTACH_TO"

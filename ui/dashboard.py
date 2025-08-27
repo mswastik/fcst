@@ -483,36 +483,14 @@ async def llm():
 
 @ui.page("/agent")
 async def agent():
-    from crewai import Agent, LLM, Crew, Task
     from ddgs import DDGS
-    from crewai_tools import ScrapeWebsiteTool, WebsiteSearchTool
     from bs4 import BeautifulSoup
     import requests
-    #from ipex_llm.transformers import AutoModelForCausalLM
-    #from transformers import AutoTokenizer
     from openai import OpenAI
 
-    #tokenizer = AutoTokenizer.from_pretrained("unsloth/Qwen3-1.7B-unsloth-bnb-4bit")
-    #model_path = "C:\\Users\\smishra14\\setup\\repos\\fcst\\llms\\Qwen3-1.7B-UD-Q4_K_XL.gguf"
-
-    client = OpenAI(
-    base_url="http://localhost:8080/v1",
-    api_key="sk-no-key-required"  # dummy key, some servers ignore it
-        )
+    client = OpenAI(base_url="http://localhost:8080/v1",api_key="sk" )
     
     '''
-    #llm=Llama(model_path=model_path,n_ctx=6148)
-    model = AutoModelForCausalLM.load_low_bit(
-            model_path,
-            load_in_low_bit="gguf",   # detect quantization automatically
-            optimize_model=True,
-        )
-
-    def local_llm(prompt):
-        inputs = tokenizer.encode(prompt, return_tensors="pt")
-        outputs = model.generate(**inputs, max_new_tokens=4000)
-        return tokenizer.decode(outputs[0], skip_special_tokens=True)
-    
     llm = LLM(
         model="openai/qwen3",  # Changed to local model identifier
         temperature=0.7,
@@ -529,7 +507,7 @@ async def agent():
         llm=llm
     )
     '''
-    def search_web(query, max_results=3):
+    def search_web(query, max_results=5):
         with DDGS() as ddgs:
             return [r['href'] for r in ddgs.text(query, max_results=max_results)]
 
@@ -543,92 +521,67 @@ async def agent():
             return ""
         
     def summarize(text, prompt="Summarize:"):
-        response = client.chat.completions.create(
+        stream = client.chat.completions.create(
         model="gemma3n",  # use whatever name your server registered
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": text}
         ],
-        max_tokens=400
+        max_tokens=400,
+        stream=True
         )
-        return response.choices[0].message.content
+        collected = ""
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+                collected += delta
+        return collected
+        #return response.choices[0].message.content
+    def loadfile(e):
+        ldf =pl.read_parquet("data/"+e)
+        pt.update_from_polars(ldf[['Product Line']].unique())
+        ct.update_from_polars(ldf[['Country']].unique())
 
-    def run_agent(product, region):
+    async def run_agent(product, region, output_area):
         queries = [
-            f"{product} market growth potential for next 5 years in {region}",
-            f"{product} competitors of Stryker in {region}"
+            f"{product} mdeical device category market growth potential for next 5 years in {region}",
+            f"{product} mdeical device category competitors of Stryker in {region}"
         ]
-        results = {}
-        for q in queries:
-            urls = search_web(q)
-            scraped = [scrape_page(u) for u in urls]
-            combined_text = " ".join(scraped)
-            results[q] = summarize(combined_text, prompt=f"Give 200 word insights for query: {q}")
-        return results
+        output_area.clear()
+        with output_area:
+            for q in queries:
+                urls = search_web(q)
+                scraped = [scrape_page(u) for u in urls]
+                combined_text = " ".join(scraped)
+                with ui.column().classes('w-1/2'):
+                    ui.label(q).classes("font-semibold mt-4")
+                    text_area = ui.markdown().classes("whitespace-pre-wrap")
+                    content = ''
+                    for token in summarize(combined_text, prompt=f"You are a {role_input.value}, your goal is to {goal_input.value} from these paragraphs: {q}"):
+                        content += token
+                        text_area.set_content(content)
+                        await ui.run_javascript('void 0',timeout=5) # Force UI update
     
-    with ui.column().classes('p-4 items-center'):
-        ui.label("Medical Device Market Research Agent").classes("text-2xl font-bold")
-        product_input = ui.input("Enter Product").classes("w-96")
-        region_input = ui.input("Enter Region").classes("w-96")
-        output_area = ui.column().classes("w-full p-4 bg-gray-100 rounded")
-
-        def run():
-            output_area.clear()
-            results = run_agent(product_input.value, region_input.value)
-            print(results)
-            for q, ans in results.items():
-                with output_area:
-                    ui.label(q).classes("text-xl font-semibold mt-4")
-                    ui.markdown(ans)
-
-        ui.button("Search", on_click=run).classes("mt-4")
-
-    '''
-    # Chat interface
-    chat_container = ui.column().classes('w-full')
-    
-    async def handle_query(query: str):
-        # Add user message to chat
-        print(query)
-        user_input.clear()
-        with chat_container:
-            ui.chat_message(query, name='User', stamp=datetime.now().strftime('%H:%M'),sent=True).classes('ml-auto mr-10')
-            
-        
-        # Use DDGS directly for search
-        results = DDGS().text(query, max_results=1)
-        print(results[0])
-        
-        # Create task with DDGS results
-        task = Task(
-            description=f"Research and provide the latest information, products, and features.",
-            expected_output="A detailed summary of the information with all available details.",
-            agent=agent
-        )
-        
-        crew = Crew(
-            agents=[agent],
-            tasks=[task],
-            verbose=True
-        )
-        
-        # Run crew with direct DDGS results
-        result = crew.kickoff(inputs=results[0])
-        
-        # Add agent response to chat
-        with chat_container:
-            ui.chat_message(result.raw, name='Agent', stamp=datetime.now().strftime('%H:%M')).classes('mr-auto ml-10')
-    
-    # Input field with send button
-    with ui.row().classes('w-full mt-auto h-32 items-end gap-2'):
-        user_input = ui.input(
-            label='Your message',
-            placeholder='Type your query here...'
-        ).classes('w-3/4 mx-auto mt-auto').on('keydown.enter', lambda e: handle_query(e.sender.value))
-        
-        ui.button(
-            'Send',
-            on_click=lambda: handle_query(user_input.value),
-            color='primary'
-        ).classes('ml-0 mr-auto mt-auto').props('flat')
-    '''
+    with ui.row(wrap=False).classes('w-full'):
+        with ui.column().classes('w-1/6'):
+            role_input = ui.textarea(label='Role',value="Business Development Manager")
+            goal_input=ui.textarea(label='Goal',value="help demand planners generate long term forecasts by providing brief 2 bullet points containing insights " \
+                "on market dynamics that can impact Stryker market share and growth and 1 bullet point containing CAGR over next 5 year of the category")
+            search_input=ui.textarea(label="Search Text")
+        with ui.column().classes('w-1/6'):
+            data_files_select = ui.select(label='DataFiles',options=os.listdir("data/"),with_input=True,on_change=lambda e: loadfile(e.value)
+                ).classes('w-40')
+            pt=ui.table(columns=[{'name':'Product Line','field':'Product Line'}]
+                        ,rows=[],row_key="name",on_select=lambda e:region_input.set_value(e.selection[0]['Product Line']),selection='single')
+            ct=ui.table(columns=[{'name':'Country','field':'Country'}],rows=[],row_key="name",
+                        on_select=lambda e:product_input.set_value(e.selection[0]['Country']),selection='single')
+        with ui.column().classes('w-4/6 p-2 items-center'):
+            ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
+            with ui.row():
+                product_input = ui.input("Enter Product") #.classes("w-96") #.bind_value_from(pt, 'name')
+                region_input = ui.input("Enter Region") #.classes("w-96")
+            ui.button("Search", on_click=lambda: run_agent(product_input.value, region_input.value, output_area)).classes("mt-4")
+            output_area = ui.row(wrap=False).classes("p-2 bg-gray-100 rounded")

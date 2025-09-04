@@ -1,7 +1,5 @@
-#import pandas as pd
-#from tqdm import tqdm
 import polars as pl
-from data_model import df, filtered_df, filtered_products, filtered_models
+from state_manager import DataState, get_global_state
 from neuralforecast import NeuralForecast
 from neuralforecast.models import NHITS
 #from neuralforecast.auto import AutoNHITS
@@ -124,8 +122,11 @@ def optimize_clusters(features_df, max_clusters=10):
     
     return best_k, best_score
 
-def create_enhanced_clusters(df, file_path):
+def create_enhanced_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
     """Enhanced clustering with proper feature engineering"""
+    if state is None:
+        state = get_global_state()
+        
     if 'unique_id' not in df.columns:
         df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
     # Filter to training data
@@ -152,14 +153,18 @@ def create_enhanced_clusters(df, file_path):
     features_df = features_df.with_columns(cluster=kmeans.fit_predict(X_scaled))
     print(features_df)
     # Join back to original data
-    df=df.drop(['cluster','cluster_right'],strict=False)
+    df = df.drop(['cluster','cluster_right'], strict=False)
     df = df.join(features_df[['unique_id', 'cluster']], on='unique_id', how='left')
     
     # Save results
     print(df)
-    df=df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
-    df=df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
+    df = df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
+    df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
     df.write_parquet(f"data/{file_path}")
+    
+    # Update state
+    state.df = df
+    
     return df
 
 def create_ensemble_models(df, file_path):
@@ -275,17 +280,12 @@ def create_ensemble_models(df, file_path):
             continue
         combined_forecast = combined_forecast.with_columns(cluster=pl.lit(str(cluster_id)))
         cluster_forecasts.append(combined_forecast)
-            
-        #except Exception as e:
-        #    print(f"Unexpected error processing cluster {cluster_id}: {str(e)}")
-        #    continue
+
     print(cluster_forecasts)
 
     # Combine all forecasts
     if cluster_forecasts:
         final_forecast = pl.concat(cluster_forecasts)
-        #print(final_forecast)
-        #final_forecast.write_parquet(f"data/{file_path}")
         return final_forecast
     else:
         print("No successful forecasts generated")
@@ -327,12 +327,14 @@ def prepare_data(df):
     
     return df.drop(['q1', 'q3', 'iqr', 'lower_bound', 'upper_bound'])
 
-def run_enhanced_forecasting_pipeline(df, file_path):
+def run_enhanced_forecasting_pipeline(df: pl.DataFrame, file_path: str, state: DataState = None):
     """Run the complete enhanced forecasting pipeline"""
+    if state is None:
+        state = get_global_state()
+        
     if 'cluster' not in df.columns or df['cluster'].unique() is None:
         # Step 1: Enhanced clustering
-        #df_clustered = create_enhanced_clusters(df, file_path)
-        df_clustered = create_clusters(df, file_path)
+        df_clustered = create_clusters(df, file_path, state)
     else:
         df_clustered = df.clone()
     # Step 2: Create ensemble models
@@ -342,17 +344,15 @@ def run_enhanced_forecasting_pipeline(df, file_path):
     unique_id_columns = ["Country","CatalogNumber"]
     forecasts = forecasts.with_columns(pl.col('unique_id').str.split_exact(",", 1).struct.rename_fields(unique_id_columns)
                                                    .alias("fields")).unnest("fields")
-    ph=pl.read_parquet('data/phierarchy.parquet')
+    ph = pl.read_parquet('data/phierarchy.parquet')
     try:
-        lh=pl.read_parquet('data/lhierarchy.parquet').drop('Selling Division').unique()
-    except:
-        lh=pl.read_parquet('data/lhierarchy.parquet')
-    forecasts=forecasts.join(ph,on='CatalogNumber',how='left')
-    forecasts=forecasts.join(lh,on='Country',how='left')
+        lh = pl.read_parquet('data/lhierarchy.parquet').drop('Selling Division').unique()
+    except Exception:
+        lh = pl.read_parquet('data/lhierarchy.parquet')
+    forecasts = forecasts.join(ph, on='CatalogNumber', how='left')
+    forecasts = forecasts.join(lh, on='Country', how='left')
     if 'NHITS' not in df.columns:
-        #original_df_polars = original_df_polars.with_columns(NHITS=pl.when(pl.col('SALES_DATE')<=last_full_month).then(0).otherwise(pl.lit(9999999)))
-        #df = df.with_columns(pl.col(model_cols).fill_null(0))
-        df=df.with_columns([pl.lit(0).alias(col_name) for col_name in model_cols])
+        df = df.with_columns([pl.lit(0).alias(col_name) for col_name in model_cols])
 
     # Step 3: Validate forecasts
     if forecasts is not None:
@@ -364,6 +364,10 @@ def run_enhanced_forecasting_pipeline(df, file_path):
                                        how='outer',coalesce=True)   
         # Save forecasts
         merged_df_polars.write_parquet(f"data/{file_path}")
+        
+        # Update state
+        state.df = merged_df_polars
+        
         return merged_df_polars, validation_results
     else:
         return None, None
@@ -384,10 +388,20 @@ def prepare_data1(df):
     dft = filter_last_36_months(udf)
     return dft
 
-def apply_filters(filters):
+def apply_filters(filters, state: DataState = None):
     """Apply filters to the dataset"""
-    global filtered_df, filtered_products, filtered_models
-    from data_model import df, filtered_df, filtered_products, filtered_models
+    if state is None:
+        state = get_global_state()
+    
+    if state.df is None:
+        return {
+            'fdf': '{}',
+            'filtered_df': pl.DataFrame(),
+            'filtered_products': [],
+            'filtered_models': []
+        }
+    
+    df = state.df.clone()
     
     if filters.get('data_files'):
         pass 
@@ -395,49 +409,67 @@ def apply_filters(filters):
        df = df.filter(pl.col(filters['location1']) == filters['location2'])
     if filters.get('product2') and filters.get('product1'):
         df = df.filter(pl.col(filters['product1']) == filters['product2'])
-    if filters.get('level'): # Update global filtered dataframe
-        fdf=df.clone()
-        df=df.group_by(['SALES_DATE',filters['level'],filters['location1']]).sum()
+    if filters.get('level'): 
+        fdf = df.clone()
+        df = df.group_by(['SALES_DATE', filters['level'], filters['location1']]).sum()
     else:
-        fdf=df.clone()
-        df=df.group_by(['SALES_DATE',filters['product1'],filters['location1']]).sum()
-    filtered_df = df
-    try:  # Update filtered products list
-        filtered_products = filtered_df[filters['product2']].unique().tolist()
-    except:
-        pass
-    filtered_models = [f"Model for {product}" for product in filtered_products]  # Update models list (placeholder for real model data)
+        fdf = df.clone()
+        df = df.group_by(['SALES_DATE', filters['product1'], filters['location1']]).sum()
+    
+    # Update state
+    state.update_filtered_data(df)
+    
+    try:
+        if filters.get('product2') and filters['product2'] in df.columns:
+            filtered_products = df[filters['product2']].unique().to_list()
+        else:
+            filtered_products = state.filtered_products
+    except Exception:
+        filtered_products = state.filtered_products
+    
+    filtered_models = [f"Model for {product}" for product in filtered_products]
+    
     return {
         'fdf': fdf.write_json(),
-        'filtered_df': filtered_df,
+        'filtered_df': df,
         'filtered_products': filtered_products,
         'filtered_models': filtered_models
     }
 
-def create_clusters(df, file_path):
+def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
+    """Create clusters for the dataset"""
+    if state is None:
+        state = get_global_state()
+    
     if 'unique_id' not in df.columns:
         df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
-    df=df.drop('cluster',strict=False)
-    df=df.drop('cluster_right',strict=False)
-    df1= df.filter(pl.col('SALES_DATE')<=datetime.today()-relativedelta(months=1))
+    df = df.drop('cluster', strict=False)
+    df = df.drop('cluster_right', strict=False)
+    df1 = df.filter(pl.col('SALES_DATE') <= datetime.today() - relativedelta(months=1))
     df1 = df1[['unique_id', 'SALES_DATE', '`Act Orders Rev']]
-    df1=df1.with_columns(pl.col('`Act Orders Rev').cast(pl.Float32).alias('`Act Orders Rev'))
-    #df1=df1.with_columns(pl.col('SALES_DATE').cast(pl.Datetime).alias('SALES_DATE'))
+    df1 = df1.with_columns(pl.col('`Act Orders Rev').cast(pl.Float32).alias('`Act Orders Rev'))
     df1 = df1.with_columns(ynorm=((pl.col('`Act Orders Rev')-pl.col('`Act Orders Rev').mean()) / pl.col('`Act Orders Rev').std()).over('unique_id'))
     df1 = df1.fill_nan(0)
     df1 = df1.with_columns(pl.when(pl.col('ynorm').is_infinite()).then(0).otherwise(pl.col('ynorm')).alias('ynorm'))
-    df1=df1.pivot(index='unique_id',on='SALES_DATE',values='ynorm',aggregate_function='sum')
-    bi=Birch(n_clusters=6).fit(df1[:,1:])
-    df1=df1.with_columns(cluster=bi.labels_)
-    df1=df1['unique_id','cluster']
-    df=df.join(df1,on='unique_id',how='left',coalesce=True)
-    df=df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
-    df=df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
+    df1 = df1.pivot(index='unique_id', on='SALES_DATE', values='ynorm', aggregate_function='sum')
+    bi = Birch(n_clusters=6).fit(df1[:, 1:])
+    df1 = df1.with_columns(cluster=bi.labels_)
+    df1 = df1['unique_id', 'cluster']
+    df = df.join(df1, on='unique_id', how='left', coalesce=True)
+    df = df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
+    df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
     df.write_parquet(f"data/{file_path}")
+    
+    # Update state with clustered data
+    state.df = df
+    
     return df
     
-def create_models_action(df, file_path):
+def create_models_action(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
     """Business logic for creating models"""
+    if state is None:
+        state = get_global_state()
+        
     forecast_list = []
     dft = prepare_data1(df)
     df_fr = dft.rename({'SALES_DATE': 'ds', '`Act Orders Rev': 'y'})
@@ -466,18 +498,17 @@ def create_models_action(df, file_path):
     unique_id_columns = ["Country","CatalogNumber"]
     final_forecasts = final_forecasts.with_columns(pl.col('unique_id').str.split_exact(",", 1).struct.rename_fields(unique_id_columns)
                                                    .alias("fields")).unnest("fields")
-    final_forecasts=final_forecasts.rename({'ds':'SALES_DATE'})
-    ph=pl.read_parquet('data/phierarchy.parquet')
+    final_forecasts = final_forecasts.rename({'ds':'SALES_DATE'})
+    ph = pl.read_parquet('data/phierarchy.parquet')
     try:
-        lh=pl.read_parquet('data/lhierarchy.parquet').drop('Selling Division').unique()
-    except:
-        lh=pl.read_parquet('data/lhierarchy.parquet')
-    final_forecasts=final_forecasts.join(ph,on='CatalogNumber',how='left')
-    final_forecasts=final_forecasts.join(lh,on='Country',how='left')
+        lh = pl.read_parquet('data/lhierarchy.parquet').drop('Selling Division').unique()
+    except Exception:
+        lh = pl.read_parquet('data/lhierarchy.parquet')
+    final_forecasts = final_forecasts.join(ph, on='CatalogNumber', how='left')
+    final_forecasts = final_forecasts.join(lh, on='Country', how='left')
     original_df_polars = pl.read_parquet(f"data/{file_path}").unique()
-    final_forecasts=final_forecasts.filter(pl.col('Stryker Group Region')==original_df_polars['Stryker Group Region'].unique()[0])
+    final_forecasts = final_forecasts.filter(pl.col('Stryker Group Region')==original_df_polars['Stryker Group Region'].unique()[0])
     if 'NHITS' not in original_df_polars.columns:
-        #original_df_polars = original_df_polars.with_columns(NHITS=pl.when(pl.col('SALES_DATE')<=last_full_month).then(0).otherwise(pl.lit(9999999)))
         original_df_polars = original_df_polars.with_columns(NHITS=0)
     merged_df_polars = original_df_polars.filter(pl.col('unique_id').is_in(final_forecasts['unique_id'].unique())).drop('NHITS').join(final_forecasts,
                         on=['SALES_DATE','CatalogNumber', 'Country','Area','Stryker Group Region','Region',
@@ -485,11 +516,12 @@ def create_models_action(df, file_path):
                                        how='outer',coalesce=True)
     # Save the merged dataframe back to the parquet file
     merged_df_polars = pl.concat([merged_df_polars,original_df_polars.filter(~pl.col('unique_id').is_in(final_forecasts['unique_id'].unique()))],how='diagonal_relaxed')
-    merged_df_polars=merged_df_polars.with_columns(pl.col('birch').forward_fill().over('unique_id'))
+    merged_df_polars = merged_df_polars.with_columns(pl.col('birch').forward_fill().over('unique_id'))
     merged_df_polars.write_parquet(f"data/{file_path}")
-    # Update the global filtered_df in models/data_model.py
-    #from data_model import filtered_df as global_filtered_df
-    #global_filtered_df = merged_df_polars
+    
+    # Update state
+    state.df = merged_df_polars
+    
     return merged_df_polars
 
 def change_fc_action():

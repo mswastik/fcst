@@ -1,6 +1,7 @@
 from nicegui import ui,run,app
-from data_model import get_filter_options, filtered_products, filtered_models, generate_sample_data, filtered_df
+from data_model import get_filter_options, generate_sample_data
 from data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
+from state_manager import get_global_state
 #from sql import sqlpd,query_st
 from ui.charts import update_charts
 import os
@@ -40,16 +41,7 @@ def create_dashboard():
     
     async def update_ui(filtered_df):
         """Update all UI components after filter changes"""
-        # Update lists
-        #products_list.clear()
-        models_list.clear()
-        
-        for product in filtered_products:
-            products_list.append(product)
-        
-        for model in filtered_models:
-            models_list.append(model)
-        
+        state = get_global_state()        
         # Update charts
         await update_charts(column_chart_container, line_chart_container,filtered_df)
         
@@ -70,7 +62,8 @@ def create_dashboard():
                     # Apply filters and update UI
                     # apply_filters updates the global filtered_df in models.data_model
                     apply_filters(filter_state) 
-                    from data_model import filtered_df as global_filtered_df
+                    state = get_global_state()
+                    global_filtered_df = state.filtered_df
                     await update_ui(global_filtered_df)
                     ui.notify(f"Filtered by CatalogNumber: {catalog_number}", type='info')
 
@@ -253,13 +246,7 @@ def create_dashboard():
             date_dialog.open()
         
         # Main content area
-        with ui.row().classes('w-full mt-2 ml-0 gap-2'):
-            # Models list
-            with ui.column().classes('w-1/6 gap-2'):
-                with ui.card().classes('w-full h-96'):
-                    ui.label('Models for filtered Products').classes('font-bold')
-                    models_list = ui.list()
-            
+        with ui.row().classes('w-full mt-2 ml-0 gap-2'):            
             # Charts row
             with ui.row().classes('w-[1190px] gap-2 mr-0'):
                 # Column chart
@@ -332,6 +319,7 @@ async def llm():
     from databricks.sdk import WorkspaceClient
     from databricks import sql
     from databricks.sdk.core import Config
+    from databricks import sdk
     from datetime import datetime, timedelta
     
     num_periods = 36
@@ -343,7 +331,7 @@ async def llm():
     start_date = start_date.strftime('%Y-%m-%d')
     
     query = f"""
-        SELECT *
+        SELECT top 10
         FROM
         (
             SELECT
@@ -425,8 +413,7 @@ async def llm():
         df1=df1.with_columns(pl.col('SALES_DATE').cast(pl.Datetime).dt.cast_time_unit('us'))
     return query_fact_sales
     '''
-    '''
-    print(spark.table("hive_metastore.da.Fact_Sales1").limit(100))
+    #print(spark.table("hive_metastore.da.Fact_Sales1").limit(100))
     http_path = f"/sql/1.0/warehouses/62d47c983bb6df91"
     
     config = Config(
@@ -458,13 +445,14 @@ async def llm():
         df = pl.from_arrow(cursor.fetchall_arrow())
         #print(df.head())
     conn.close()
-    
+    print(df)
     #spark.table("hive_metastore.da.Fact_Sales").limit(100)
     spark = DatabricksSession.builder.clusterId('0805-063508-emq3q7q8').getOrCreate()
     #spark = DatabricksSession.builder.clusterId(os.environ['DB_CLUSTER_ID']).getOrCreate()
     #print(spark.table("hive_metastore.da.Fact_Sales1").limit(100))
     #df = spark.read.table("samples.nyctaxi.trips")
       # cfg with auth for Service Principal
+    '''
     sp_cfg = sdk.config.Config()
     # request handler
     async def query(user, request: gr.Request):

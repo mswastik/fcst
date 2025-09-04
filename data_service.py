@@ -167,226 +167,73 @@ def create_enhanced_clusters(df: pl.DataFrame, file_path: str, state: DataState 
     
     return df
 
-def create_ensemble_models(df, file_path):
-    """Create ensemble models for each cluster"""
-    from neuralforecast import NeuralForecast
-    from neuralforecast.models import NHITS, LSTM, MLP
-    from neuralforecast.losses.pytorch import RMSE, MAE
-    from statsforecast import StatsForecast
-    from statsforecast.models import AutoARIMA, AutoETS, SeasonalNaive
+def create_ensemble_models(df: pl.DataFrame, file_path: str) -> pl.DataFrame:
+    """Create ensemble models for each cluster using the new modular approach."""
+    from forecasting.model_factory import EnsembleForecaster
+    from forecasting.data_processor import DataCleaner
     
-    forecast_list = []
+    # Prepare data
     dft = prepare_data1(df)
-    dft = prepare_data(dft)
+    dft = DataCleaner.prepare_data_for_forecasting(dft)
     df_fr = dft.rename({'SALES_DATE': 'ds', '`Act Orders Rev': 'y'})
     df_fr = df_fr[['unique_id', 'ds', 'y', 'cluster']]
     
-    # Realistic horizon based on available data
-    available_months = len(df_fr['ds'].unique())
-    #horizon = min(24, available_months)  # Max 2 years or half of available data
-    horizon = 60
-    input_size = min(horizon, available_months)
-    #input_size = available_months
+    # Create forecaster and generate forecasts
+    forecaster = EnsembleForecaster(horizon=60)
+    return forecaster.generate_forecasts(df_fr)
     
-    print(f"Forecasting horizon: {horizon} months")
-    print(f"Input size: {input_size} months")
-    
-    cluster_forecasts = []
-    
-    for cluster_id in df_fr['cluster'].unique():
-        if cluster_id is None:
-            continue
-            
-        cluster_data = df_fr.filter(pl.col('cluster') == cluster_id)
-        cluster_data = cluster_data[['unique_id', 'ds', 'y']]
-        
-        print(f"Processing cluster {cluster_id} with {len(cluster_data['unique_id'].unique())} series")
-        
-        # Calculate appropriate batch sizes
-        n_series = len(cluster_data['unique_id'].unique())
-        batch_size = max(1, min(16, n_series // 2))
-        windows_batch_size = max(1, min(16, n_series // 2))
-        
-        # Neural models with fixed dimensions
-        nhits = NHITS(
-                h=horizon,
-                input_size=input_size,
-                max_steps=180,
-                stack_types=['identity'] * 2,
-                n_blocks=[1, 1],  # Reduced complexity
-                mlp_units=[[64, 32], [32, 16]],  # Proper dimension progression
-                n_pool_kernel_size=[2, 2],
-                n_freq_downsample=[2, 2],
-                interpolation_mode='nearest',
-                activation='ReLU',
-                dropout_prob_theta=0.1,
-                scaler_type='robust',
-                loss=RMSE(),
-                valid_loss=RMSE(),
-                batch_size=batch_size,
-                windows_batch_size=windows_batch_size,
-                random_seed=42,
-                start_padding_enabled=True,
-                learning_rate=1e-3,
-                val_check_steps=25,
-            )
-        lstm = LSTM(
-                h=horizon,
-                input_size=input_size,
-                max_steps=180,
-                encoder_hidden_size=32,  # Reduced from 64
-                encoder_n_layers=1,      # Reduced from 2
-                encoder_dropout=0.1,
-                scaler_type='robust',
-                loss=RMSE(),
-                valid_loss=RMSE(),
-                batch_size=batch_size,
-                random_seed=42,
-                learning_rate=1e-3,
-            )
-        
-        # Statistical models
-        stat_models = [
-            AutoARIMA(season_length=12),
-            AutoETS(season_length=12),
-            SeasonalNaive(season_length=12)
-        ]
-        
-        #try:
-        # Fit neural models
-        nf = NeuralForecast(models=[nhits,lstm], freq='1mo')
-
-        nf.fit(df=cluster_data.fill_nan(0).fill_null(0))
-        neural_forecasts = nf.predict()
-        
-        # Fit statistical models
-        sf = StatsForecast(models=stat_models, freq='1mo')
-        sf.fit(df=cluster_data.fill_nan(0).fill_null(0))
-        stat_forecasts = sf.predict(h=horizon)
-        
-        # Combine forecasts
-        combined_forecast = neural_forecasts.join(
-            stat_forecasts, on=['unique_id', 'ds'], how='outer',coalesce=True
-        )
-        
-        # Create ensemble (simple average of available models)
-        model_cols = [col for col in combined_forecast.columns if col not in ['unique_id', 'ds']]
-        if model_cols:
-            combined_forecast = combined_forecast.with_columns(
-                ensemble=pl.concat_list([pl.col(col) for col in model_cols]).list.mean()
-            )
-        else:
-            print(f"No valid forecasts generated for cluster {cluster_id}")
-            continue
-        combined_forecast = combined_forecast.with_columns(cluster=pl.lit(str(cluster_id)))
-        cluster_forecasts.append(combined_forecast)
-
-    print(cluster_forecasts)
-
-    # Combine all forecasts
-    if cluster_forecasts:
-        final_forecast = pl.concat(cluster_forecasts)
-        return final_forecast
-    else:
-        print("No successful forecasts generated")
-        return None
-    
-def validate_forecasts(df, forecast_df, validation_months=6):
+def validate_forecasts(df: pl.DataFrame, forecast_df: pl.DataFrame, validation_months: int = 6) -> dict:
     """Validate forecasts using walk-forward validation"""
-    from sklearn.metrics import mean_absolute_error, mean_squared_error
-    
-    # Implementation of walk-forward validation
-    # This would involve splitting data, training, forecasting, and measuring errors
-    validation_results = {}
-    
-    # Placeholder for validation logic
-    print("Forecast validation completed")
-    return validation_results
+    from forecasting.data_processor import ValidationProcessor
+    return ValidationProcessor.validate_forecasts(df, forecast_df, validation_months)
 
 # Additional utility functions
-def prepare_data(df):
+def prepare_data(df: pl.DataFrame) -> pl.DataFrame:
     """Prepare data with proper handling of missing values and outliers"""
-    # Remove outliers using IQR method
-    df = df.with_columns(
-        q1=pl.col('`Act Orders Rev').quantile(0.25).over('unique_id'),
-        q3=pl.col('`Act Orders Rev').quantile(0.75).over('unique_id')
-    )
-    df = df.with_columns(iqr=pl.col('q3') - pl.col('q1'))
-    df=df.with_columns(lower_bound=pl.col('q1') - 1.5 * pl.col('iqr'))
-    df=df.with_columns(upper_bound=pl.col('q3') + 1.5 * pl.col('iqr'))
-    
-    # Cap outliers instead of removing them
-    df = df.with_columns(
-        pl.when(pl.col('`Act Orders Rev') < pl.col('lower_bound'))
-        .then(pl.col('lower_bound'))
-        .when(pl.col('`Act Orders Rev') > pl.col('upper_bound'))
-        .then(pl.col('upper_bound'))
-        .otherwise(pl.col('`Act Orders Rev'))
-        .alias('`Act Orders Rev')
-    )
-    
-    return df.drop(['q1', 'q3', 'iqr', 'lower_bound', 'upper_bound'])
+    from forecasting.data_processor import DataCleaner
+    return DataCleaner.prepare_data_for_forecasting(df)
 
 def run_enhanced_forecasting_pipeline(df: pl.DataFrame, file_path: str, state: DataState = None):
     """Run the complete enhanced forecasting pipeline"""
+    from forecasting.data_processor import ForecastDataProcessor
+    
     if state is None:
         state = get_global_state()
         
+    # Step 1: Clustering
     if 'cluster' not in df.columns or df['cluster'].unique() is None:
-        # Step 1: Enhanced clustering
         df_clustered = create_clusters(df, file_path, state)
     else:
         df_clustered = df.clone()
+    
     # Step 2: Create ensemble models
     forecasts = create_ensemble_models(df_clustered, file_path)
-    forecasts = forecasts.rename({'ds':'SALES_DATE'})
-    model_cols = [col for col in forecasts.columns if col not in ['unique_id', 'SALES_DATE']]
-    unique_id_columns = ["Country","CatalogNumber"]
-    forecasts = forecasts.with_columns(pl.col('unique_id').str.split_exact(",", 1).struct.rename_fields(unique_id_columns)
-                                                   .alias("fields")).unnest("fields")
-    ph = pl.read_parquet('data/phierarchy.parquet')
-    try:
-        lh = pl.read_parquet('data/lhierarchy.parquet').drop('Selling Division').unique()
-    except Exception:
-        lh = pl.read_parquet('data/lhierarchy.parquet')
-    forecasts = forecasts.join(ph, on='CatalogNumber', how='left')
-    forecasts = forecasts.join(lh, on='Country', how='left')
-    if 'NHITS' not in df.columns:
-        df = df.with_columns([pl.lit(0).alias(col_name) for col_name in model_cols])
-
-    # Step 3: Validate forecasts
-    if forecasts is not None:
-        validation_results = validate_forecasts(df_clustered, forecasts)
-        
-        merged_df_polars = df.filter(pl.col('unique_id').is_in(forecasts['unique_id'].unique())).drop(model_cols).join(forecasts,
-                        on=['SALES_DATE','CatalogNumber', 'Country','Area','Stryker Group Region','Region',
-                        'Business Sector','Business Unit','Franchise','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','unique_id'],
-                                       how='outer',coalesce=True)   
-        # Save forecasts
-        merged_df_polars.write_parquet(f"data/{file_path}")
-        
-        # Update state
-        state.df = merged_df_polars
-        
-        return merged_df_polars, validation_results
-    else:
+    
+    if forecasts is None:
         return None, None
+    
+    # Step 3: Process and integrate forecasts
+    processor = ForecastDataProcessor()
+    merged_df = processor.process_forecasts(forecasts, df, file_path)
+    
+    # Step 4: Validate forecasts
+    validation_results = validate_forecasts(df_clustered, forecasts)
+    
+    # Update state
+    if merged_df is not None:
+        state.df = merged_df
+    
+    return merged_df, validation_results
 
-def filter_last_36_months(df):
-    start_date = last_full_month - relativedelta(months=35)  # 35 + 1 = 36 months
-    filtered_df = df.filter(pl.col('SALES_DATE') >= start_date).filter(pl.col('SALES_DATE') <= last_full_month)
-    return filtered_df
+def filter_last_36_months(df: pl.DataFrame) -> pl.DataFrame:
+    """Filter data to last 36 months"""
+    from forecasting.data_processor import DataCleaner
+    return DataCleaner.filter_last_n_months(df, 36)
 
-def prepare_data1(df):
-    #clean_df = clean_data(df)
-    columns_to_drop = [
-        'UOM', 'NPI Flag', 'Pack Content', '`L0 ASP Final Rev','Act Orders Rev Val', 'L2 DF Final Rev', 'L1 DF Final Rev',
-        'L0 DF Final Rev', 'L2 Stat Final Rev', '`Fcst DF Final Rev','`Fcst Stat Final Rev', '`Fcst Stat Prelim Rev', 'Fcst DF Final Rev Val']
-    clean_df = df.drop([col for col in columns_to_drop if col in df.columns])
-    clean_df = clean_df.fill_nan(0)
-    udf = clean_df.with_columns(unique_id=pl.col('Country') + "," + pl.col('CatalogNumber'))
-    dft = filter_last_36_months(udf)
-    return dft
+def prepare_data1(df: pl.DataFrame) -> pl.DataFrame:
+    """Prepare data for training"""
+    from forecasting.data_processor import DataCleaner
+    return DataCleaner.prepare_training_data(df)
 
 def apply_filters(filters, state: DataState = None):
     """Apply filters to the dataset"""
@@ -466,63 +313,20 @@ def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -
     return df
     
 def create_models_action(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
-    """Business logic for creating models"""
+    """Business logic for creating models using the new modular approach."""
+    from forecasting.simple_forecaster import SimpleModelPipeline
+    
     if state is None:
         state = get_global_state()
-        
-    forecast_list = []
-    dft = prepare_data1(df)
-    df_fr = dft.rename({'SALES_DATE': 'ds', '`Act Orders Rev': 'y'})
-    df_fr = df_fr[['unique_id', 'ds', 'y']] 
-
-    # NHITS model setup
-    horizon = 56
-    input_size = 56
-    stacks = 3
-
-    models = [NHITS(
-        h=horizon, input_size=input_size, max_steps=700, stack_types=['identity'] * stacks,
-        n_blocks=[3]*stacks, mlp_units=[[256, 256, 128]] * stacks, n_pool_kernel_size=[2, 4, 6],
-        n_freq_downsample=[2, 4, 6], interpolation_mode='nearest', activation='ReLU', dropout_prob_theta=0.3,
-        scaler_type='robust', loss=RMSE(), valid_loss=RMSE(), batch_size=36, windows_batch_size=35, random_seed=1,
-        start_padding_enabled=True, learning_rate=1e-3, val_check_steps=100 )]
-
-    nf = NeuralForecast(models=models, freq='1mo')
-    nf.fit(df=df_fr.fill_nan(0).fill_null(0))
     
-    # Forecast
-    forecasts = nf.predict()
-    forecast_list.append(forecasts)
-    
-    final_forecasts = pl.concat(forecast_list)
-    unique_id_columns = ["Country","CatalogNumber"]
-    final_forecasts = final_forecasts.with_columns(pl.col('unique_id').str.split_exact(",", 1).struct.rename_fields(unique_id_columns)
-                                                   .alias("fields")).unnest("fields")
-    final_forecasts = final_forecasts.rename({'ds':'SALES_DATE'})
-    ph = pl.read_parquet('data/phierarchy.parquet')
-    try:
-        lh = pl.read_parquet('data/lhierarchy.parquet').drop('Selling Division').unique()
-    except Exception:
-        lh = pl.read_parquet('data/lhierarchy.parquet')
-    final_forecasts = final_forecasts.join(ph, on='CatalogNumber', how='left')
-    final_forecasts = final_forecasts.join(lh, on='Country', how='left')
-    original_df_polars = pl.read_parquet(f"data/{file_path}").unique()
-    final_forecasts = final_forecasts.filter(pl.col('Stryker Group Region')==original_df_polars['Stryker Group Region'].unique()[0])
-    if 'NHITS' not in original_df_polars.columns:
-        original_df_polars = original_df_polars.with_columns(NHITS=0)
-    merged_df_polars = original_df_polars.filter(pl.col('unique_id').is_in(final_forecasts['unique_id'].unique())).drop('NHITS').join(final_forecasts,
-                        on=['SALES_DATE','CatalogNumber', 'Country','Area','Stryker Group Region','Region',
-                        'Business Sector','Business Unit','Franchise','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','unique_id'],
-                                       how='outer',coalesce=True)
-    # Save the merged dataframe back to the parquet file
-    merged_df_polars = pl.concat([merged_df_polars,original_df_polars.filter(~pl.col('unique_id').is_in(final_forecasts['unique_id'].unique()))],how='diagonal_relaxed')
-    merged_df_polars = merged_df_polars.with_columns(pl.col('birch').forward_fill().over('unique_id'))
-    merged_df_polars.write_parquet(f"data/{file_path}")
+    # Use the new modular pipeline
+    pipeline = SimpleModelPipeline()
+    merged_df = pipeline.run_pipeline(df, file_path)
     
     # Update state
-    state.df = merged_df_polars
+    state.df = merged_df
     
-    return merged_df_polars
+    return merged_df
 
 def change_fc_action():
     """Business logic for changing forecast settings"""

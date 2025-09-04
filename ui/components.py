@@ -10,6 +10,7 @@ from typing import Dict, Any, Callable, Optional
 from state_manager import get_global_state
 from data_model import get_filter_options, generate_sample_data
 from data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
+from forecasting.model_validator import ModelValidator, ValidationReportGenerator
 
 
 class FilterComponents:
@@ -190,21 +191,20 @@ class ChartComponents:
     
     def create_charts_row(self):
         """Create the charts row with both column and line charts."""
-        with ui.row().classes('w-[1190px] gap-2 mr-0'):
+        with ui.row().classes('w-full gap-2 mr-0'):
             self.column_chart_container = self._create_column_chart()
             self.line_chart_container = self._create_line_chart()
-        
         return self.column_chart_container, self.line_chart_container
     
     def _create_column_chart(self):
         """Create column chart container."""
-        with ui.column().classes('w-[590px] h-96 gap-0'):
-            return ui.card().classes('w-full h-full')
+        #with ui.column().classes('w-1/2 h-96 gap-0'):
+        return ui.card().classes('flex-1 w-1/2 h-96')   #.classes('w-full h-full')
     
     def _create_line_chart(self):
         """Create line chart container."""
-        with ui.column().classes('w-[590px] h-96 gap-0'):
-            return ui.card().classes('w-full h-full')
+        #with ui.column().classes('w-1/2 h-96 gap-0'):
+        return ui.card().classes('flex-1 w-1/2 h-96')  #.classes('w-full h-full')
 
 
 class ActionButtons:
@@ -219,6 +219,7 @@ class ActionButtons:
         with ui.row().classes('gap-2'):
             ui.button('Segmentation', on_click=self._run_cluster).classes('bg-green-100')
             ui.button('Generate Forecast', on_click=self._run_create_models).classes('bg-green-100')
+            ui.button('Validate Models', on_click=self._run_validation).classes('bg-blue-100')
             ui.button('Change FC', on_click=self._change_forecast).classes('bg-green-100')
             ui.button('View', on_click=self._show_view_dialog).classes('bg-green-100')
     
@@ -252,6 +253,31 @@ class ActionButtons:
     def _change_forecast(self):
         """Handle forecast change action."""
         ui.notify(change_fc_action(), type='info')
+    
+    async def _run_validation(self):
+        """Handle model validation action."""
+        if not hasattr(self.dwn_data, 'df') or self.dwn_data.df is None or len(self.dwn_data.df) == 0:
+            ui.notify('No data available for validation. Please load data first.', type='warning')
+            return
+        
+        n = ui.notification(timeout=None)
+        n.message = "Running model validation for last 3 months..."
+        n.spinner = True
+        
+        try:
+            validator = ModelValidator()
+            validation_results = await run.cpu_bound(
+                validator.validate_last_3_months,
+                self.dwn_data.df,
+                self.filter_state['data_files'] or 'default.parquet'
+            )
+            
+            n.dismiss()
+            ValidationResultsDialog(validation_results).show()
+            
+        except Exception as e:
+            n.dismiss()
+            ui.notify(f'Validation failed: {str(e)}', type='negative')
     
     def _show_view_dialog(self):
         """Show the view data dialog."""
@@ -457,3 +483,249 @@ class DetailsTable:
         global_filtered_df = state.filtered_df
         await self.update_ui_callback(global_filtered_df)
         ui.notify(f"Filtered by CatalogNumber: {catalog_number}", type='info')
+
+
+class ValidationResultsDialog:
+    """Handles the validation results display dialog."""
+    
+    def __init__(self, validation_results: Dict):
+        self.validation_results = validation_results
+    
+    def show(self):
+        """Show the validation results dialog."""
+        with ui.dialog().props('maximized') as dialog, ui.card().classes('w-full h-full'):
+            self._create_dialog_header()
+            self._create_dialog_content()
+            self._create_dialog_footer(dialog)
+        dialog.open()
+    
+    def _create_dialog_header(self):
+        """Create the dialog header."""
+        with ui.row().classes('w-full justify-between items-center p-4 bg-blue-50'):
+            ui.label('Model Validation Results - Last 3 Months').classes('text-h5 font-bold')
+            ui.label(f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}').classes('text-caption')
+    
+    def _create_dialog_content(self):
+        """Create the main content of the dialog."""
+        with ui.column().classes('w-full h-full p-4 gap-4'):
+            # Summary statistics
+            self._create_summary_section()
+            
+            # Detailed results tabs
+            with ui.tabs().classes('w-full') as tabs:
+                comparison_tab = ui.tab('Comparison')
+                ensemble_tab = ui.tab('Ensemble')
+                nhits_tab = ui.tab('NHITS')
+                lstm_tab = ui.tab('LSTM')
+                arima_tab = ui.tab('AutoARIMA')
+                ets_tab = ui.tab('AutoETS')
+                naive_tab = ui.tab('SeasonalNaive')
+                report_tab = ui.tab('Full Report')
+            
+            with ui.tab_panels(tabs, value=comparison_tab).classes('w-full h-96'):
+                with ui.tab_panel(comparison_tab):
+                    self._create_comparison_panel()
+                
+                with ui.tab_panel(ensemble_tab):
+                    self._create_model_panel('ensemble', 'Ensemble')
+                
+                with ui.tab_panel(nhits_tab):
+                    self._create_model_panel('nhits', 'NHITS')
+                
+                with ui.tab_panel(lstm_tab):
+                    self._create_model_panel('lstm', 'LSTM')
+                
+                with ui.tab_panel(arima_tab):
+                    self._create_model_panel('autoarima', 'AutoARIMA')
+                
+                with ui.tab_panel(ets_tab):
+                    self._create_model_panel('autoets', 'AutoETS')
+                
+                with ui.tab_panel(naive_tab):
+                    self._create_model_panel('seasonalnaive', 'SeasonalNaive')
+                
+                with ui.tab_panel(report_tab):
+                    self._create_report_panel()
+    
+    def _create_summary_section(self):
+        """Create the summary statistics section."""
+        validator = ModelValidator()
+        validator.validation_results = self.validation_results
+        summary = validator.get_summary_statistics()
+        
+        with ui.card().classes('w-full'):
+            ui.label('Summary Statistics').classes('text-h6 font-bold mb-2')
+            
+            # Create summary cards for all models
+            model_colors = {
+                'ensemble': 'bg-green-50',
+                'nhits': 'bg-blue-50', 
+                'lstm': 'bg-purple-50',
+                'autoarima': 'bg-orange-50',
+                'autoets': 'bg-red-50',
+                'seasonalnaive': 'bg-yellow-50'
+            }
+            
+            model_display_names = {
+                'ensemble': 'Ensemble',
+                'nhits': 'NHITS',
+                'lstm': 'LSTM',
+                'autoarima': 'AutoARIMA',
+                'autoets': 'AutoETS',
+                'seasonalnaive': 'SeasonalNaive'
+            }
+            
+            # Create rows of model summary cards
+            with ui.row().classes('w-full gap-2 flex-wrap'):
+                for model_key, model_name in model_display_names.items():
+                    if model_key in summary and summary[model_key].get('num_validations', 0) > 0:
+                        with ui.card().classes(f'flex-1 min-w-48 {model_colors.get(model_key, "bg-gray-50")}'):
+                            ui.label(model_name).classes('font-bold text-center')
+                            model_stats = summary[model_key]
+                            ui.label(f"Avg Accuracy: {model_stats.get('avg_accuracy', 0):.1f}%")
+                            ui.label(f"Avg MAE: {model_stats.get('avg_mae', 0):.2f}")
+                            ui.label(f"Validations: {model_stats.get('num_validations', 0)}")
+            
+            # Overall comparison summary
+            if 'overall_comparison' in summary and summary['overall_comparison']:
+                with ui.card().classes('w-full bg-gray-100 mt-4'):
+                    ui.label('Overall Performance').classes('font-bold text-center mb-2')
+                    overall = summary['overall_comparison']
+                    
+                    with ui.row().classes('w-full gap-4 justify-center'):
+                        for key, value in overall.items():
+                            if key.endswith('_wins') and value > 0:
+                                model_name = key.replace('_wins', '').title()
+                                ui.label(f"{model_name}: {value} wins").classes('text-sm')
+    
+    def _create_comparison_panel(self):
+        """Create the model comparison panel."""
+        comparison_results = self.validation_results.get('comparison', [])
+        
+        if not comparison_results:
+            ui.label('No comparison data available').classes('text-center text-gray-500 mt-8')
+            return
+        
+        # Create summary table
+        summary_df = ValidationReportGenerator.generate_summary_table(self.validation_results)
+        
+        if summary_df.height > 0:
+            with ui.column().classes('w-full'):
+                ui.label('Month-by-Month Comparison').classes('text-h6 font-bold mb-4')
+                ui.table.from_polars(summary_df).classes('w-full')
+        
+        # Create comparison chart
+        self._create_comparison_chart(comparison_results)
+    
+    def _create_comparison_chart(self, comparison_results):
+        """Create a comparison chart."""
+        if not comparison_results:
+            return
+        
+        # Prepare data for chart - include all models
+        months = [comp['month'] for comp in comparison_results]
+        
+        # Define model colors and names
+        model_info = {
+            'ensemble': {'name': 'Ensemble', 'color': '#10B981'},
+            'nhits': {'name': 'NHITS', 'color': '#3B82F6'},
+            'lstm': {'name': 'LSTM', 'color': '#8B5CF6'},
+            'autoarima': {'name': 'AutoARIMA', 'color': '#F59E0B'},
+            'autoets': {'name': 'AutoETS', 'color': '#EF4444'},
+            'seasonalnaive': {'name': 'SeasonalNaive', 'color': '#84CC16'}
+        }
+        
+        # Collect data for all models
+        chart_series = []
+        for model_key, info in model_info.items():
+            model_data = []
+            for comp in comparison_results:
+                accuracy = comp.get(f'{model_key}_accuracy')
+                model_data.append(accuracy if accuracy is not None else None)
+            
+            # Only add series if there's at least one non-null value
+            if any(val is not None for val in model_data):
+                chart_series.append({
+                    'name': info['name'],
+                    'data': model_data,
+                    'color': info['color'],
+                    'connectNulls': False
+                })
+        
+        if chart_series:
+            with ui.card().classes('w-full mt-4'):
+                ui.label('Accuracy Comparison Chart - All Models').classes('text-h6 font-bold mb-2')
+                
+                chart_config = {
+                    'chart': {'type': 'line', 'height': 400},
+                    'title': {'text': 'Model Accuracy Comparison'},
+                    'xAxis': {'categories': months},
+                    'yAxis': {'title': {'text': 'Accuracy (%)'}, 'min': 0, 'max': 100},
+                    'series': chart_series,
+                    'legend': {'enabled': True},
+                    'tooltip': {
+                        'shared': True,
+                        'valueSuffix': '%'
+                    }
+                }
+                
+                ui.highchart(chart_config).classes('w-full')
+    
+    def _create_model_panel(self, model_key: str, model_display_name: str):
+        """Create a results panel for a specific model."""
+        model_results = self.validation_results.get(model_key, [])
+        
+        if not model_results:
+            ui.label(f'No {model_display_name} validation results available').classes('text-center text-gray-500 mt-8')
+            return
+        
+        # Create detailed results table
+        model_data = []
+        for result in model_results:
+            model_data.append({
+                'Month': result.month,
+                'Accuracy': f"{result.accuracy_percentage:.2f}%",
+                'MAE': f"{result.mae:.2f}",
+                'MAPE': f"{result.mape:.2f}%",
+                'RMSE': f"{result.rmse:.2f}",
+                'Bias': f"{result.forecast_bias:.2f}"
+            })
+        
+        if model_data:
+            model_df = pl.DataFrame(model_data)
+            ui.label(f'{model_display_name} Model Detailed Results').classes('text-h6 font-bold mb-4')
+            ui.table.from_polars(model_df).classes('w-full')
+    
+    def _create_report_panel(self):
+        """Create the full report panel."""
+        report_text = ValidationReportGenerator.generate_text_report(self.validation_results)
+        
+        with ui.column().classes('w-full'):
+            ui.label('Full Validation Report').classes('text-h6 font-bold mb-4')
+            
+            with ui.card().classes('w-full bg-gray-50'):
+                ui.code(report_text).classes('w-full whitespace-pre-wrap text-sm')
+    
+    def _create_dialog_footer(self, dialog):
+        """Create the dialog footer with action buttons."""
+        with ui.row().classes('w-full justify-end gap-2 p-4 bg-gray-50'):
+            ui.button('Export Report', on_click=self._export_report).props('color=primary outline')
+            ui.button('Close', on_click=dialog.close).props('color=primary')
+    
+    def _export_report(self):
+        """Export the validation report."""
+        try:
+            report_text = ValidationReportGenerator.generate_text_report(self.validation_results)
+            
+            # Save to file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"validation_report_{timestamp}.txt"
+            filepath = os.path.join("data", filename)
+            
+            with open(filepath, 'w') as f:
+                f.write(report_text)
+            
+            ui.notify(f'Report exported to {filepath}', type='positive')
+            
+        except Exception as e:
+            ui.notify(f'Export failed: {str(e)}', type='negative')

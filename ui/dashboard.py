@@ -107,7 +107,6 @@ def create_dashboard():
 @ui.page("/raw_data")
 def raw_data_page():
      from pathlib import Path
-     # Initialize df_json with default value
      df_json = '[]'  # Empty JSON array as default
      if 'dwn_df_json' in app.storage.user:
         df_json = app.storage.user['dwn_df_json']

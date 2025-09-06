@@ -26,3 +26,4 @@ archive/clustering data.pbix
 llms/*
 .roo/*
 db/*
+forecasting.duckdb

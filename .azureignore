@@ -25,3 +25,4 @@ archive/clustering data.pbix
 llms/*
 .roo/*
 sql.py
+forecasting.duckdb

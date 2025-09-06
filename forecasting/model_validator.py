@@ -33,12 +33,15 @@ class ModelValidator:
         self.validation_results = []
         self.comparison_results = {}
     
-    def validate_last_3_months(self, df: pl.DataFrame, file_path: str) -> Dict[str, List[ValidationMetrics]]:
+    def validate_last_3_months(self, df_dict: dict) -> Dict[str, List[ValidationMetrics]]:
         """
         Validate forecast accuracy for the last 3 months.
         For each validation month, uses only data up to 3 months before that month.
         """
         print("Starting 3-month validation process...")
+        
+        # Convert dictionary back to DataFrame
+        df = pl.DataFrame(df_dict)
         
         # Get the last 3 months for validation
         today = datetime.today()

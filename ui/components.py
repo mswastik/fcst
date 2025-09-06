@@ -10,6 +10,7 @@ from typing import Dict, Any, Callable, Optional
 from state_manager import get_global_state
 from data_model import get_filter_options, generate_sample_data
 from data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
+from simple_pipeline import standalone_forecasting_pipeline
 from forecasting.model_validator import ModelValidator, ValidationReportGenerator
 
 
@@ -19,37 +20,45 @@ class FilterComponents:
     def __init__(self, filter_state: Dict[str, Any], on_filter_change: Callable):
         self.filter_state = filter_state
         self.on_filter_change = on_filter_change
-        self.options = get_filter_options()
+        # Get filter options from the global state
+        from state_manager import get_global_state
+        state = get_global_state()
+        self.options = state.get_filter_options()
     
     def create_filter_row(self):
         """Create the main filter row with all filter components."""
         with ui.row().classes('w-full gap-2'):
-            self._create_data_files_select()
             self._create_location_selects()
             self._create_product_selects()
             self._create_level_select()
+            self._create_data_files_select()
             self._create_get_data_button()
     
     def _create_data_files_select(self):
-        """Create data files selection dropdown."""
-        return ui.select(
-            label='DataFiles',
-            options=os.listdir("data/"),
+        """Create data files selection dropdown - now loads from DuckDB."""
+        '''return ui.select(
+            label='Load Data',
+            options=['Load from Database'],
             with_input=True,
             on_change=lambda e: self.on_filter_change('data_files', e.value)
-        ).classes('w-40')
+            ).classes('w-40')'''
+        return ui.button(
+            'Load Data',
+            on_click=lambda e: self.on_filter_change('data_files', e)
+        ).classes('ml-5 mt-3')
     
     def _create_location_selects(self):
         """Create location filter dropdowns."""
         location_select1 = ui.select(
             label='Location',
             options=self.options['locations'],
-            with_input=True,
+            with_input=False,
+            value='Region',
             on_change=lambda e: self.on_filter_change('location1', e.value)
-        ).classes('w-40').bind_value(self.filter_state, 'location1')
+        ).classes('w-40') #.bind_value(self.filter_state, 'location1')
         
         self.location_select2 = ui.select(
-            label='Location',
+            label='Region',
             options=self.options['locations_filt'],
             with_input=True,
             on_change=lambda e: self.on_filter_change('location2', e.value)
@@ -59,23 +68,42 @@ class FilterComponents:
     
     def _create_product_selects(self):
         """Create product filter dropdowns."""
-        product_select1 = ui.select(
+        self.product_select1 = ui.select(
             label='Product',
             options=self.options['products'],
-            with_input=True,
-            on_change=lambda e: self.on_filter_change('product1', e.value),
-            clearable=True
-        ).classes('w-40').bind_value(self.filter_state, 'product1')
+            with_input=False,
+            value='Franchise',
+            on_change=lambda e: self._on_product_hierarchy_change(e.value),
+        ).classes('w-40')
         
         self.product_select2 = ui.select(
-            label='Product',
+            label='Franchise',
             options=self.options['products_filt'],
             with_input=True,
             on_change=lambda e: self.on_filter_change('product2', e.value),
             clearable=True
         ).classes('w-40').bind_value(self.filter_state, 'product2')
         
-        return product_select1, self.product_select2
+        return self.product_select1, self.product_select2
+    
+    def _on_product_hierarchy_change(self, value):
+        """Handle product hierarchy selection change."""
+        # Update the filter state
+        self.on_filter_change('product1', value)
+        
+        # Update the second dropdown label and get new options
+        self.product_select2._props.update({'label': value})
+        
+        # Get updated options based on the selected hierarchy level
+        from state_manager import get_global_state
+        from data_model import get_filter_options
+        
+        # Use the data_model function which properly handles the database lookup
+        options = get_filter_options(prod=value, loc=self.filter_state.get('location1'))
+        
+        # Update the options in the second dropdown
+        self.product_select2.options = options['products_filt']
+        self.product_select2.update()
     
     def _create_level_select(self):
         """Create level selection dropdown."""
@@ -225,30 +253,103 @@ class ActionButtons:
     
     async def _run_cluster(self):
         """Handle clustering action."""
-        ui.notify('Creating clusters...', type='info')
-        self.dwn_data.df = await run.cpu_bound(
-            create_clusters, 
-            self.dwn_data.df, 
-            self.filter_state['data_files']
-        )
-        ui.notify('Clusters created!', type='success')
+        # Get filtered data from global state for clustering
+        from state_manager import get_global_state
+        state = get_global_state()
+        filtered_df = state.filtered_df if state.filtered_df is not None else self.dwn_data.df
+        
+        if filtered_df is None or len(filtered_df) == 0:
+            ui.notify('No data available for clustering. Please load and filter data first.', type='warning')
+            return
+        
+        # Show progress notification
+        n = ui.notification(timeout=None)
+        n.message = "Creating clusters... This may take a few minutes."
+        n.spinner = True
+        
+        try:
+            # Create a simple wrapper for clustering that uses filtered data
+            async def cluster_wrapper():
+                from data_service import create_clusters
+                result = create_clusters(filtered_df, "", state)
+                
+                # Verify data was saved to database
+                from db_service import get_database_service
+                db_service = get_database_service()
+                cluster_count = db_service.get_cluster_count()
+                print(f"Clusters saved to database. Total cluster records: {cluster_count}")
+                
+                return result
+            
+            self.dwn_data.df = await cluster_wrapper()
+            
+            n.message = 'Clustering completed successfully!'
+            n.spinner = False
+            n.dismiss()
+            ui.notify('Clusters created and saved to database!', type='success')
+            
+        except Exception as e:
+            n.dismiss()
+            ui.notify(f'Clustering failed: {str(e)}', type='negative')
+            print(f"Clustering error: {e}")
     
     async def _run_create_models(self):
         """Handle model creation action."""
+        # Get filtered data from global state
+        from state_manager import get_global_state
+        state = get_global_state()
+        filtered_df = state.filtered_df if state.filtered_df is not None else self.dwn_data.df
+        
+        if filtered_df is None or len(filtered_df) == 0:
+            ui.notify('No data available for forecasting. Please load and filter data first.', type='warning')
+            return
+        
+        # Show detailed progress notification
         n = ui.notification(timeout=None)
-        n.message = "Running!! "
+        n.message = "Initializing forecasting pipeline..."
         n.spinner = True
         
-        self.dwn_data.df, _ = await run.cpu_bound(
-            run_enhanced_forecasting_pipeline, 
-            self.dwn_data.df, 
-            self.filter_state['data_files']
-        )
-        
-        n.message = 'Done!'
-        n.spinner = False
-        n.dismiss()
-        ui.notify('Models created and forecasts saved!', type='success')
+        try:
+            # Update progress
+            n.message = "Processing data and running forecasting models... This may take several minutes."
+            
+            result_dict, validation_results = await run.cpu_bound(
+                standalone_forecasting_pipeline, 
+                filtered_df.to_dict(as_series=False)
+            )
+            
+            # Update progress
+            n.message = "Saving results to database..."
+            
+            # Reconstruct dataframe from dictionary result
+            if result_dict is not None:
+                self.dwn_data.df = pl.DataFrame(result_dict)
+                # Update global state with the processed data
+                state.df = self.dwn_data.df
+                
+                # Verify data was saved to database
+                from db_service import get_database_service
+                db_service = get_database_service()
+                
+                # Check if forecasts were saved (if forecast table exists)
+                try:
+                    forecast_count = db_service.get_forecast_count()
+                    print(f"Forecasts saved to database. Total forecast records: {forecast_count}")
+                except:
+                    print("Forecast table not yet implemented, but clustering data was processed")
+                
+                n.message = 'Forecasting completed successfully!'
+                n.spinner = False
+                n.dismiss()
+                ui.notify('Models created and results saved to database!', type='success')
+            else:
+                n.dismiss()
+                ui.notify('Forecasting completed but no results returned', type='warning')
+                
+        except Exception as e:
+            n.dismiss()
+            ui.notify(f'Forecasting failed: {str(e)}', type='negative')
+            print(f"Forecasting error: {e}")
     
     def _change_forecast(self):
         """Handle forecast change action."""
@@ -266,10 +367,14 @@ class ActionButtons:
         
         try:
             validator = ModelValidator()
+            # Use filtered data for validation
+            from state_manager import get_global_state
+            state = get_global_state()
+            filtered_df = state.filtered_df if state.filtered_df is not None else self.dwn_data.df
+            
             validation_results = await run.cpu_bound(
                 validator.validate_last_3_months,
-                self.dwn_data.df,
-                self.filter_state['data_files'] or 'default.parquet'
+                filtered_df.to_dict(as_series=False)
             )
             
             n.dismiss()
@@ -304,7 +409,7 @@ class ViewDataDialog:
         # Define schema to avoid deserialization errors
         schema = {
             'SALES_DATE': pl.Utf8,
-            '`Act Orders Rev': pl.Float64,
+            'Act Orders Rev': pl.Float64,
             'unique_id': pl.Utf8,
             'CatalogNumber': pl.Utf8,
             'Country': pl.Utf8,
@@ -320,15 +425,15 @@ class ViewDataDialog:
             'IBP Level 7': pl.Utf8,
             'UOM': pl.Float64,
             'Pack Content': pl.Float64,
-            '`L0 ASP Final Rev': pl.Float64,
+            'ASP Final Rev': pl.Float64,
             'Act Orders Rev Val': pl.Float64,
             'L2 DF Final Rev': pl.Float64,
             'L1 DF Final Rev': pl.Float64,
             'L0 DF Final Rev': pl.Float64,
             'L2 Stat Final Rev': pl.Float64,
-            '`Fcst DF Final Rev': pl.Float64,
-            '`Fcst Stat Final Rev': pl.Float64,
-            '`Fcst Stat Prelim Rev': pl.Float64,
+            'Fcst DF Final Rev': pl.Float64,
+            'Fcst Stat Final Rev': pl.Float64,
+            'Fcst Stat Prelim Rev': pl.Float64,
             'Fcst DF Final Rev Val': pl.Float64,
             'birch': pl.Float64,
             'cluster': pl.Utf8,
@@ -350,8 +455,8 @@ class ViewDataDialog:
         # Convert date and numeric columns
         if 'SALES_DATE' in full_df.columns:
             full_df = full_df.with_columns(pl.col('SALES_DATE').str.to_datetime())
-        if '`Act Orders Rev' in full_df.columns:
-            full_df = full_df.with_columns(pl.col('`Act Orders Rev').cast(pl.Float32))
+        if 'Act Orders Rev' in full_df.columns:
+            full_df = full_df.with_columns(pl.col('Act Orders Rev').cast(pl.Float32))
         
         # Handle cluster column if present
         if 'cluster' in full_df.columns:
@@ -449,7 +554,7 @@ class DetailsTable:
                 table_df = f1.pivot(
                     'SALES_DATE',
                     index=[self.filter_state['location1'], self.filter_state['level']],
-                    values='`Act Orders Rev',
+                    values='Act Orders Rev',
                     aggregate_function='sum',
                     sort_columns=True
                 )
@@ -457,18 +562,32 @@ class DetailsTable:
                 table_df = f1.pivot(
                     'SALES_DATE',
                     index=self.filter_state['location1'],
-                    values='`Act Orders Rev',
+                    values='Act Orders Rev',
                     aggregate_function='sum',
                     sort_columns=True
                 )
             else:
-                table_df = f1.pivot(
-                    'SALES_DATE',
-                    index='Region',
-                    values='`Act Orders Rev',
-                    aggregate_function='sum',
-                    sort_columns=True
-                )
+                # Use the first available location column as fallback
+                available_location_cols = ['Region', 'Country', 'Area']
+                index_col = None
+                for col in available_location_cols:
+                    if col in f1.columns:
+                        index_col = col
+                        break
+                
+                if index_col:
+                    table_df = f1.pivot(
+                        'SALES_DATE',
+                        index=index_col,
+                        values='Act Orders Rev',
+                        aggregate_function='sum',
+                        sort_columns=True
+                    )
+                else:
+                    # If no location columns available, create a simple aggregated table
+                    table_df = f1.group_by('SALES_DATE').agg(
+                        pl.col('Act Orders Rev').sum()
+                    ).sort('SALES_DATE')
             
             ui.table.from_polars(table_df, pagination=10).classes('w-full').props('virtual-scroll').on('rowClick', self._on_row_click)
     

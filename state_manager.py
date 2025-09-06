@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 import polars as pl
 from dataclasses import dataclass, field
 from datetime import datetime
+from db_service import get_database_service
 
 
 @dataclass
@@ -40,12 +41,10 @@ class DataState:
     
     def __post_init__(self):
         """Initialize hierarchy data after object creation."""
-        try:
-            self.products_filt = pl.read_parquet('data/phierarchy.parquet')
-            self.locations_filt = pl.read_parquet('data/lhierarchy.parquet')
-        except Exception:
-            self.products_filt = pl.DataFrame()
-            self.locations_filt = pl.DataFrame()
+        # Don't initialize database connection during module import
+        # This will be loaded lazily when needed
+        self.products_filt = pl.DataFrame()
+        self.locations_filt = pl.DataFrame()
     
     def initialize_data(self) -> None:
         """Initialize the application data."""
@@ -53,18 +52,44 @@ class DataState:
         self.df = None
         self.filtered_df = None
     
-    def load_sample_data(self, path: str) -> pl.DataFrame:
-        """Load sample data from parquet file."""
+    def load_sample_data(self, path: str = None) -> pl.DataFrame:
+        """Load sample data from DuckDB database."""
         try:
-            self.df = pl.read_parquet(path)
-            self.df = self.df.with_columns(
-                pl.col('`Act Orders Rev', '`Fcst Stat Prelim Rev', '`Fcst Stat Final Rev', 
-                       'L2 Stat Final Rev', '`Fcst DF Final Rev', 'L2 DF Final Rev').cast(pl.Float32)
-            )
+            db_service = get_database_service()
+            # Load sales actuals with joined hierarchy data
+            self.df = db_service.get_sales_actuals()
+            
+            # Convert column names to match expected format
+            if 'act_orders_rev' in self.df.columns:
+                self.df = self.df.rename({
+                    'act_orders_rev': 'Act Orders Rev',
+                    'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
+                    'fcst_stat_final_rev': 'Fcst Stat Final Rev',
+                    'l2_stat_final_rev': 'L2 Stat Final Rev',
+                    'fcst_df_final_rev': 'Fcst DF Final Rev',
+                    'l2_df_final_rev': 'L2 DF Final Rev',
+                    'sales_date': 'SALES_DATE',
+                    'catalog_number': 'CatalogNumber',
+                    'region': 'Region',
+                    'country': 'Country',
+                    'area': 'Area',
+                    'business_unit': 'Business Unit',
+                    'franchise': 'Franchise',
+                    'ibp_level_5': 'IBP Level 5',
+                    'ibp_level_6': 'IBP Level 6'
+                })
+            
+            # Cast numeric columns to Float32
+            numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev', 
+                           'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev']
+            for col in numeric_cols:
+                if col in self.df.columns:
+                    self.df = self.df.with_columns(pl.col(col).cast(pl.Float32))
+            
             self.filtered_df = self.df.clone()
             return self.df
         except Exception as e:
-            raise ValueError(f"Failed to load data from {path}: {e}")
+            raise ValueError(f"Failed to load data from database: {e}")
     
     def get_filter_options(self, prod: str = None, loc: str = None) -> Dict[str, Any]:
         """Return filter options for UI dropdowns."""
@@ -72,17 +97,75 @@ class DataState:
         loc = loc or self.locations[0]
         
         try:
-            if self.df is not None:
+            if self.df is not None and len(self.df) > 0:
+                # Check if the requested column exists in the dataframe
+                if prod in self.df.columns:
+                    products_filt = [x for x in self.df[prod].unique().to_list() if x is not None]
+                else:
+                    # Try to find the column with a different case or format
+                    products_filt = []
+                    for col in self.df.columns:
+                        if col.lower().replace(' ', '_') == prod.lower().replace(' ', '_'):
+                            products_filt = [x for x in self.df[col].unique().to_list() if x is not None]
+                            break
+                    
+                    # Debug: Print available columns to help identify the issue
+                    if not products_filt:
+                        print(f"Product column '{prod}' not found. Available columns: {self.df.columns}")
+                        print(f"Looking for pattern: {prod.lower().replace(' ', '_')}")
+                
+                if loc in self.df.columns:
+                    locations_filt = self.df[loc].unique().to_list()
+                else:
+                    # Try to find the column with a different case or format
+                    locations_filt = []
+                    for col in self.df.columns:
+                        if col.lower().replace(' ', '_') == loc.lower().replace(' ', '_'):
+                            locations_filt = self.df[col].unique().to_list()
+                            break
+                
                 return {
-                    'products_filt': self.df[prod].unique().to_list(),
-                    'locations_filt': self.df[loc].unique().to_list(),
+                    'products_filt': products_filt,
+                    'locations_filt': locations_filt,
                     'products': self.products,
                     'locations': self.locations,
                     'levels': self.levels
                 }
-        except Exception:
-            pass
+            else:
+                # Load filter options from database when no data is loaded yet
+                db_service = get_database_service()
+                filter_options = db_service.get_filter_options()
+                
+                # Map the requested product/location to appropriate database fields
+                prod_key = 'catalog_numbers'  # Default
+                if prod == 'Franchise':
+                    prod_key = 'franchises'
+                elif prod == 'IBP Level 5':
+                    prod_key = 'ibp_level_5s'
+                elif prod == 'IBP Level 6':
+                    prod_key = 'ibp_level_6s'
+                elif prod == 'CatalogNumber':
+                    prod_key = 'catalog_numbers'
+                
+                loc_key = 'countries'  # Default
+                if loc == 'Region':
+                    loc_key = 'regions'
+                elif loc == 'Area':
+                    loc_key = 'areas'
+                elif loc == 'Country':
+                    loc_key = 'countries'
+                
+                return {
+                    'products_filt': filter_options.get(prod_key, []),
+                    'locations_filt': filter_options.get(loc_key, []),
+                    'products': self.products,
+                    'locations': self.locations,
+                    'levels': self.levels
+                }
+        except Exception as e:
+            print(f"Error getting filter options: {e}")
         
+        # Return default options as fallback
         return {
             'products_filt': [],
             'locations_filt': [],
@@ -142,7 +225,7 @@ class DataState:
         chart_data = chart_data.with_columns(Year=pl.col('SALES_DATE').dt.year())
         
         # Group by Year and Month for actuals
-        agg_actuals = chart_data.group_by(['Year', 'Month']).sum()['Year', 'Month', '`Act Orders Rev']
+        agg_actuals = chart_data.group_by(['Year', 'Month']).sum()['Year', 'Month', 'Act Orders Rev']
         
         # Group by Year and Month for forecasts (only if NHITS exists)
         agg_forecasts = None
@@ -179,7 +262,7 @@ class DataState:
             for month in month_order:
                 month_row = year_data.filter(pl.col('Month') == month)
                 if len(month_row) > 0:
-                    actual_values.append(month_row['`Act Orders Rev'][0])
+                    actual_values.append(month_row['Act Orders Rev'][0])
                     forecast_values.append(
                         month_row['NHITS'][0] if 'NHITS' in month_row.columns else None
                     )
@@ -215,7 +298,7 @@ class DataState:
         chart_data = chart_data.sort('group')
         
         if self.by_month:
-            agg_data = chart_data.group_by('group').sum()['`Act Orders Rev']
+            agg_data = chart_data.group_by('group').sum()['Act Orders Rev']
             forecast_values = []
             if 'NHITS' in chart_data.columns:
                 agg_data = agg_data.with_columns(
@@ -225,7 +308,7 @@ class DataState:
             x_values = agg_data['group'].to_list()
         else:
             # Aggregate by date for line chart
-            agg_data = chart_data.group_by('group').sum()['group', '`Act Orders Rev']
+            agg_data = chart_data.group_by('group').sum()['group', 'Act Orders Rev']
             forecast_values = []
             if 'NHITS' in chart_data.columns:
                 agg_data = agg_data.with_columns(
@@ -236,7 +319,7 @@ class DataState:
         
         return {
             'categories': x_values,
-            'values': agg_data['`Act Orders Rev'].to_list(),
+            'values': agg_data['Act Orders Rev'].to_list(),
             'forecast_values': forecast_values
         }
 

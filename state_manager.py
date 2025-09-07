@@ -15,6 +15,7 @@ class DataState:
     
     # Main dataframes
     df: Optional[pl.DataFrame] = None
+    full_df: Optional[pl.DataFrame] = None  # Store original full dataset
     filtered_df: Optional[pl.DataFrame] = None
     
     # Filter state
@@ -50,6 +51,7 @@ class DataState:
         """Initialize the application data."""
         # Reset dataframes
         self.df = None
+        self.full_df = None
         self.filtered_df = None
     
     def load_sample_data(self, path: str = None) -> pl.DataFrame:
@@ -86,6 +88,7 @@ class DataState:
                 if col in self.df.columns:
                     self.df = self.df.with_columns(pl.col(col).cast(pl.Float32))
             
+            self.full_df = self.df.clone()  # Store original full dataset
             self.filtered_df = self.df.clone()
             return self.df
         except Exception as e:

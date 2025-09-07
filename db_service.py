@@ -788,13 +788,13 @@ class DataMigrator:
         # Column mapping from source to target
         columns_map = {
             'demantra_item_skey': 'demantra_item_skey',
-            'Business_Sector': 'business_sector',
-            'Business_Unit': 'business_unit',
+            'Business Sector': 'business_sector',
+            'Business Unit': 'business_unit',
             'Franchise': 'franchise',
             'Product Line': 'product_line',
-            'IBP_Level_5': 'ibp_level_5',
-            'IBP_Level_6': 'ibp_level_6',
-            'IBP_Level_7': 'ibp_level_7',
+            'IBP Level 5': 'ibp_level_5',
+            'IBP Level 6': 'ibp_level_6',
+            'IBP Level 7': 'ibp_level_7',
             'CatalogNumber': 'catalog_number',
             'UOM': 'uom',
             'Pack Content': 'pack_content'

@@ -29,10 +29,13 @@ def create_dashboard():
     ui.colors(primary='#555')
     dwn = dwn_data()
     
-    # Filter state
+    # Initialize filter state
     filter_state = {
-        'data_files': None, 'location1': 'Region', 'location2': None,
-        'product1': 'Franchise', 'product2': None, 'level': None
+        'location1': 'Region',
+        'location2': '',
+        'product1': 'Franchise',  # Default value
+        'product2': '',
+        'level': ''
     }
     
     async def update_ui(filtered_df):
@@ -71,9 +74,22 @@ def create_dashboard():
             )['products_filt']
             filter_components.update_product_options(options)
         
-        # Apply filters only when both location and product filters are set
-        if ((filter_state.get('location2') and filter_state.get('location1')) and
-            (filter_state.get('product2') and filter_state.get('product1'))):
+        # Apply filters when meaningful filter combinations are set
+        # Allow data loading for various combinations:
+        # 1. Both location and product filters
+        # 2. Just product filter with specific value
+        # 3. Just location filter with specific value
+        load_data_condition = (
+            # Both location and product filters set
+            ((filter_state.get('location2') and filter_state.get('location1')) and
+             (filter_state.get('product2') and filter_state.get('product1'))) or
+            # Just product filter with specific value
+            (filter_state.get('product2') and filter_state.get('product1')) or
+            # Just location filter with specific value
+            (filter_state.get('location2') and filter_state.get('location1'))
+        )
+
+        if load_data_condition:
 
             # Check if data is loaded, if not, load it with size estimation
             from state_manager import get_global_state
@@ -100,7 +116,7 @@ def create_dashboard():
             # Get database service
             db_service = get_database_service()
 
-            # Estimate data size based on filters
+            # Estimate data size based on filters - handle partial filters
             estimated_rows = db_service.estimate_filtered_data_size(
                 location_col=filter_state.get('location1'),
                 location_val=filter_state.get('location2'),
@@ -182,6 +198,7 @@ def create_dashboard():
 
             # Update state and storage
             state.df = dwn.df.clone()
+            state.full_df = dwn.df.clone()  # Store current filtered data as "full" for subsequent filtering
             state.filtered_df = dwn.df.clone()
             app.storage.user['dwn_df_json'] = dwn.df.write_json()
 

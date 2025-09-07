@@ -72,20 +72,20 @@ class FilterComponents:
             label='Product',
             options=self.options['products'],
             with_input=False,
-            value='Franchise',
-            on_change=lambda e: self._on_product_hierarchy_change(e.value),
+            value='Franchise',  # Use filter_state value instead of hardcoded
+            on_change=lambda e: self.on_filter_change('product1', e.value),
         ).classes('w-40')
         
         self.product_select2 = ui.select(
-            label='Franchise',
+            label=self.filter_state.get('product1', 'Franchise'),  # Use filter_state value for label
             options=self.options['products_filt'],
             with_input=True,
             on_change=lambda e: self.on_filter_change('product2', e.value),
             clearable=True
-        ).classes('w-40').bind_value(self.filter_state, 'product2')
+        ).classes('w-40')
         
         return self.product_select1, self.product_select2
-    
+    '''
     def _on_product_hierarchy_change(self, value):
         """Handle product hierarchy selection change."""
         # Update the filter state
@@ -104,7 +104,7 @@ class FilterComponents:
         # Update the options in the second dropdown
         self.product_select2.options = options['products_filt']
         self.product_select2.update()
-    
+    '''
     def _create_level_select(self):
         """Create level selection dropdown."""
         return ui.select(

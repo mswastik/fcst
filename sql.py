@@ -17,6 +17,42 @@ path = os.path.expanduser("~")+'/fcst'
 #    past_months=-12
 ss="gda-globalsynapseanalytics-ws-prod.sql.azuresynapse.net"
 
+def sales_actuals():
+    query=f'''
+    SELECT
+        [item_skey],[Location_skey],[SALES_DATE],
+        AVG([ASP_Final_Rev]) [ASP Final Rev], 
+        SUM([Act_Orders_Rev]) [Act Orders Rev],
+        SUM([Act_Orders_Rev_Val]) [Act Orders Rev Val],
+        SUM(Fcst_DF_Final_Rev) as [Fcst DF Final Rev], 
+        SUM(s."L0_DF_Final_Rev") as [L0 DF Final Rev],
+        SUM(s."L1_DF_Final_Rev") as [L1 DF Final Rev], 
+        SUM(s.[L2_DF_Final_Rev]) as [L2 DF Final Rev],
+        SUM(Fcst_DF_Final_Rev_Val) as [Fcst DF Final Rev Val],
+        SUM(Fcst_Stat_Prelim_Rev) as [Fcst Stat Prelim Rev],
+        SUM(Fcst_Stat_Final_Rev) as [Fcst Stat Final Rev],
+        SUM(s."L0_Stat_Final_Rev") as [L0 Stat Final Rev],
+        SUM(s."L1_Stat_Final_Rev") as [L1 Stat Final Rev], 
+        SUM(s.[L2_Stat_Final_Rev]) as [L2 Stat Final Rev] 
+        
+    FROM [Envision].[Demantra_CLD_Fact_Sales] s
+    JOIN [Envision].[DIM_Demantra_CLD_products] p
+    ON s.item_skey = p.demantra_item_skey AND p.[Current] = 'True'
+    JOIN [Envision].[Dim_DEMANTRA_CLD_MDP_Matrix] m
+    ON s.MDP_Key = m.MDP_Key
+
+    WHERE
+        [SALES_DATE] BETWEEN DATEADD(month, -3, GETDATE()) AND DATEADD(month, -1, GETDATE()) AND
+        s.Location_sKey<>-1
+    GROUP BY
+        [item_skey],[Location_skey],[SALES_DATE]
+    '''
+    connection_string=f"Driver={{ODBC Driver 18 for SQL Server}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
+    reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
+    df1=pl.DataFrame()
+    for batch in reader:
+        df1=pl.concat([df1,pl.from_arrow(batch)])
+
 def sqlpd(loc='',reg='',prod='',fn='',pm=6,nm=6):
     print('Starting Query!!!')
     query=f'''
@@ -87,10 +123,10 @@ def sqlpd(loc='',reg='',prod='',fn='',pm=6,nm=6):
 async def phierarchy():
     query=f'''
     SELECT DISTINCT
-        p.[BusinessSector] as [Business Sector],p.[BusinessUnit] as [Business Unit],p.[Franchise],p.[ProductLine] as [Product Line],
-        p.[IBPLevel5] as [IBP Level 5],p.[IBPLevel6] as [IBP Level 6],p.[IBPLevel7] as [IBP Level 7],p.[CatalogNumber]
+        [demantra_item_skey],p.[Business_Sector] as [Business Sector],p.[Business_Unit] as [Business Unit],p.[Franchise],p.[ProductLine] as [Product Line],
+        p.[IBPLevel5] as [IBP Level 5],p.[IBP_Level_6] as [IBP Level 6],p.[IBPLevel7] as [IBP Level 7],p.[CatalogNumber],[Current]
 
-    FROM [Envision].[DIM_Demantra_CLD_demantraproducts] p
+    FROM [Envision].[DIM_Demantra_CLD_products] p
  '''
     connection_string=f"Driver={{{d[-1]}}};Server={ss};database=gda_glbsyndb;Encrypt=Yes;Authentication=ActiveDirectoryInteractive;"
     reader = read_arrow_batches_from_odbc(query=query,connection_string=connection_string)
@@ -105,7 +141,7 @@ async def phierarchy():
 async def lhierarchy():
     query=f'''
     SELECT DISTINCT
-        [SellingDivision] as [Selling Division],[COUNTRY_GROUP] 'Area',[StrykerGroupRegion] as [Stryker Group Region],[Region],[Country]
+        [Location_skey] as [Location_skey],[SellingDivision] as [Selling Division],[COUNTRY_GROUP] 'Area',[StrykerGroupRegion] as [Stryker Group Region],[Region],[Country]
             
     FROM [Envision].[DIM_Demantra_CLD_DemantraLocation] l
  '''

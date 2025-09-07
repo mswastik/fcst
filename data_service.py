@@ -321,18 +321,50 @@ def apply_filters(filters, state: DataState = None):
     
     df = state.df.clone()
     
-    if filters.get('data_files'):
-        pass 
+    # Mapping from display names to actual column names in the data
+    # These should match the column names after loading from the database
+    column_mapping = {
+        'Franchise': 'Franchise',
+        'IBP Level 5': 'IBP Level 5',  # Match the display name from state_manager
+        'IBP Level 6': 'IBP Level 6',  # Match the display name from state_manager
+        'CatalogNumber': 'CatalogNumber',
+        'Region': 'Region',
+        'Country': 'Country',
+        'Area': 'Area'
+    }
+    
+    #if filters.get('data_files'):
+    #    pass 
     if filters.get('location2') and filters.get('location1'):
-       df = df.filter(pl.col(filters['location1']) == filters['location2'])
+        location_col = column_mapping.get(filters['location1'])
+        if location_col and location_col in df.columns:
+            df = df.filter(pl.col(location_col) == filters['location2'])
     if filters.get('product2') and filters.get('product1'):
-        df = df.filter(pl.col(filters['product1']) == filters['product2'])
+        product_col = column_mapping.get(filters['product1'])
+        if product_col and product_col in df.columns:
+            df = df.filter(pl.col(product_col) == filters['product2'])
     if filters.get('level'): 
         fdf = df.clone()
-        df = df.group_by(['SALES_DATE', filters['level'], filters['location1']]).sum()
+        # Use level + location1 if location1 is set, otherwise just level
+        level_col = column_mapping.get(filters['level'])
+        if level_col and level_col in df.columns:
+            group_cols = ['SALES_DATE', level_col]
+            if filters.get('location1'):
+                location_col = column_mapping.get(filters['location1'])
+                if location_col and location_col in df.columns:
+                    group_cols.append(location_col)
+            df = df.group_by(group_cols).sum()
     else:
         fdf = df.clone()
-        df = df.group_by(['SALES_DATE', filters['product1'], filters['location1']]).sum()
+        # Use product1 + location1 if location1 is set, otherwise just product1
+        product_col = column_mapping.get(filters['product1'])
+        if product_col and product_col in df.columns:
+            group_cols = ['SALES_DATE', product_col]
+            if filters.get('location1'):
+                location_col = column_mapping.get(filters['location1'])
+                if location_col and location_col in df.columns:
+                    group_cols.append(location_col)
+            df = df.group_by(group_cols).sum()
     
     # Update state
     state.update_filtered_data(df)

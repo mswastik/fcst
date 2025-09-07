@@ -110,7 +110,7 @@ class FilterComponents:
         return ui.select(
             label='Level',
             options=[''] + self.options['levels'],
-            with_input=True,
+            clearable=True,
             on_change=lambda e: self.on_filter_change('level', e.value)
         ).classes('w-40')
     
@@ -593,15 +593,38 @@ class DetailsTable:
     
     async def _on_row_click(self, e):
         """Handle row click events."""
-        catalog_number = e.args[1]['CatalogNumber']
-        self.filter_state['product1'] = 'CatalogNumber'
-        self.filter_state['product2'] = catalog_number
+        # Get the selected row data
+        row_data = e.args[1]
         
-        apply_filters(self.filter_state)
-        state = get_global_state()
-        global_filtered_df = state.filtered_df
-        await self.update_ui_callback(global_filtered_df)
-        ui.notify(f"Filtered by CatalogNumber: {catalog_number}", type='info')
+        # Determine which product column to use based on current filter
+        product_col = None
+        product_value = None
+        
+        # Try to find the appropriate product identifier
+        if 'CatalogNumber' in row_data and row_data['CatalogNumber']:
+            product_col = 'CatalogNumber'
+            product_value = row_data['CatalogNumber']
+        elif 'IBP Level 6' in row_data and row_data['IBP Level 6']:
+            product_col = 'IBP Level 6'
+            product_value = row_data['IBP Level 6']
+        elif 'IBP Level 5' in row_data and row_data['IBP Level 5']:
+            product_col = 'IBP Level 5'
+            product_value = row_data['IBP Level 5']
+        elif 'Franchise' in row_data and row_data['Franchise']:
+            product_col = 'Franchise'
+            product_value = row_data['Franchise']
+        
+        if product_col and product_value:
+            self.filter_state['product1'] = product_col
+            self.filter_state['product2'] = product_value
+            
+            apply_filters(self.filter_state)
+            state = get_global_state()
+            global_filtered_df = state.filtered_df
+            await self.update_ui_callback(global_filtered_df)
+            ui.notify(f"Filtered by {product_col}: {product_value}", type='info')
+        else:
+            ui.notify("Could not determine product identifier from selected row", type='warning')
 
 
 class ValidationResultsDialog:

@@ -27,3 +27,5 @@ llms/*
 .roo/*
 db/*
 forecasting.duckdb
+forecasting1.duckdb
+forecasting2.duckdb

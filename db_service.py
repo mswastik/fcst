@@ -205,8 +205,8 @@ class DatabaseService:
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
         
-        result = self.conn.execute(query, params).fetchdf()
-        return pl.from_pandas(result)
+        result = self.conn.execute(query, params).pl()
+        return result
     
     # Location Hierarchy Operations
     def upsert_location_hierarchy(self, df: pl.DataFrame) -> int:
@@ -244,8 +244,8 @@ class DatabaseService:
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
         
-        result = self.conn.execute(query, params).fetchdf()
-        return pl.from_pandas(result)
+        result = self.conn.execute(query, params).pl()
+        return result
     
     # Sales Actuals Operations
     def upsert_sales_actuals(self, df: pl.DataFrame) -> int:
@@ -553,7 +553,7 @@ class DatabaseService:
             WHERE catalog_number IS NOT NULL
             ORDER BY catalog_number
             """
-            products_df = pl.from_pandas(self.conn.execute(products_query).fetchdf())
+            products_df = self.conn.execute(products_query).pl()  #.fetchdf())
             
             # Get unique locations
             locations_query = """
@@ -562,7 +562,7 @@ class DatabaseService:
             WHERE country IS NOT NULL
             ORDER BY country
             """
-            locations_df = pl.from_pandas(self.conn.execute(locations_query).fetchdf())
+            locations_df = self.conn.execute(locations_query).pl() #.fetchdf())
             
             # Extract unique values, filtering out nulls
             catalog_numbers = [x for x in products_df['catalog_number'].unique().to_list() if x is not None]
@@ -589,35 +589,146 @@ class DatabaseService:
             logger.error(f"Failed to get filter options: {e}")
             return {}
     
-    def get_summary_stats(self) -> Dict[str, Any]:
-        """Get summary statistics for the database"""
+    def estimate_filtered_data_size(self, location_col: str = None, location_val: str = None,
+                                   product_col: str = None, product_val: str = None) -> int:
+        """Estimate the number of rows that would be returned with given filters"""
         self._ensure_connection()
         try:
-            stats = {}
-            
-            # Count records in each table
-            tables = ['product_hierarchy', 'location_hierarchy', 'sales_actuals', 
-                     'product_clusters', 'forecasts']
-            
-            for table in tables:
-                count_query = f"SELECT COUNT(*) as count FROM {table}"
-                result = self.conn.execute(count_query).fetchone()
-                stats[f"{table}_count"] = result[0] if result else 0
-            
-            # Date range of sales data
-            date_query = """
-            SELECT MIN(sales_date) as min_date, MAX(sales_date) as max_date
-            FROM sales_actuals
+            # Build WHERE conditions
+            where_conditions = []
+            params = []
+
+            # Map display names to database column names
+            column_mapping = {
+                'Region': 'region',
+                'Country': 'country',
+                'Area': 'area',
+                'Franchise': 'franchise',
+                'IBP Level 5': 'ibp_level_5',
+                'IBP Level 6': 'ibp_level_6',
+                'CatalogNumber': 'catalog_number'
+            }
+
+            if location_col and location_val:
+                db_location_col = column_mapping.get(location_col, location_col.lower().replace(' ', '_'))
+                where_conditions.append(f"{db_location_col} = ?")
+                params.append(location_val)
+
+            if product_col and product_val:
+                db_product_col = column_mapping.get(product_col, product_col.lower().replace(' ', '_'))
+                where_conditions.append(f"{db_product_col} = ?")
+                params.append(product_val)
+
+            where_clause = " AND ".join(where_conditions) if where_conditions else ""
+
+            # Count query with filters
+            count_query = f"""
+            SELECT COUNT(*) as count
+            FROM sales_actuals sa
+            JOIN product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
+            JOIN location_hierarchy lh ON sa.location_skey = lh.location_skey
+            {"WHERE " + where_clause if where_clause else ""}
             """
-            date_result = self.conn.execute(date_query).fetchone()
-            if date_result:
-                stats['data_start_date'] = date_result[0]
-                stats['data_end_date'] = date_result[1]
-            
-            return stats
+
+            if where_clause:
+                result = self.conn.execute(count_query, params).fetchone()
+            else:
+                result = self.conn.execute(count_query).fetchone()
+
+            return result[0] if result else 0
+
         except Exception as e:
-            logger.error(f"Failed to get summary stats: {e}")
-            return {}
+            logger.error(f"Failed to estimate data size: {e}")
+            # Return a conservative estimate if estimation fails
+            return 1000000
+
+    def get_filtered_sales_actuals(self, location_col: str = None, location_val: str = None,
+                                  product_col: str = None, product_val: str = None) -> pl.DataFrame:
+        """Get sales actuals data with filters applied at database level"""
+        self._ensure_connection()
+        try:
+            # Build WHERE conditions
+            where_conditions = []
+            params = []
+
+            # Map display names to database column names
+            column_mapping = {
+                'Region': 'region',
+                'Country': 'country',
+                'Area': 'area',
+                'Franchise': 'franchise',
+                'IBP Level 5': 'ibp_level_5',
+                'IBP Level 6': 'ibp_level_6',
+                'CatalogNumber': 'catalog_number'
+            }
+
+            if location_col and location_val:
+                db_location_col = column_mapping.get(location_col, location_col.lower().replace(' ', '_'))
+                where_conditions.append(f"lh.{db_location_col} = ?")
+                params.append(location_val)
+
+            if product_col and product_val:
+                db_product_col = column_mapping.get(product_col, product_col.lower().replace(' ', '_'))
+                where_conditions.append(f"ph.{db_product_col} = ?")
+                params.append(product_val)
+
+            where_clause = " AND ".join(where_conditions) if where_conditions else ""
+
+            # Query with filters applied at database level
+            query = f"""
+            SELECT
+                sa.sales_date,
+                sa.act_orders_rev,
+                sa.fcst_stat_prelim_rev,
+                sa.fcst_stat_final_rev,
+                sa.l2_stat_final_rev,
+                sa.fcst_df_final_rev,
+                sa.l2_df_final_rev,
+                sa.act_orders_rev_val,
+                sa.l2_df_final_rev,
+                sa.l1_df_final_rev,
+                sa.l0_df_final_rev,
+                sa.l2_stat_final_rev,
+                sa.fcst_df_final_rev,
+                sa.fcst_stat_final_rev,
+                sa.fcst_stat_prelim_rev,
+                sa.fcst_df_final_rev_val,
+
+                -- Location fields
+                lh.country,
+                lh.region,
+                lh.area,
+                lh.selling_division,
+                lh.stryker_group_region,
+
+                -- Product fields
+                ph.catalog_number,
+                ph.business_sector,
+                ph.business_unit,
+                ph.franchise,
+                ph.product_line,
+                ph.ibp_level_5,
+                ph.ibp_level_6,
+                ph.ibp_level_7,
+                ph.uom,
+                ph.pack_content
+            FROM sales_actuals sa
+            JOIN product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
+            JOIN location_hierarchy lh ON sa.location_skey = lh.location_skey
+            {"WHERE " + where_clause if where_clause else ""}
+            ORDER BY sa.sales_date
+            """
+
+            if where_clause:
+                df = self.conn.execute(query, params).pl()
+            else:
+                df = self.conn.execute(query).pl()
+
+            return df
+
+        except Exception as e:
+            logger.error(f"Failed to get filtered sales actuals: {e}")
+            return pl.DataFrame()
 
 
 # Migration utilities

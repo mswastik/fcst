@@ -36,8 +36,13 @@ def initialize_data():
     state.initialize_data()
 
 def generate_sample_data(path: str = None) -> pl.DataFrame:
-    """Generate sample data for the application from DuckDB"""
-    return state.load_sample_data(path)
+    """Generate sample data for the application from DuckDB with lazy loading"""
+    if path is None:
+        # Lazy loading mode - return empty dataframe until filters are applied
+        return pl.DataFrame()
+    else:
+        # Legacy mode for backward compatibility
+        return state.load_sample_data(path)
 def get_filter_options(prod: Optional[str] = None, loc: Optional[str] = None) -> Dict[str, Any]:
     """Return filter options for UI dropdowns"""
     from db_service import get_database_service

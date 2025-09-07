@@ -31,18 +31,22 @@ def create_dashboard():
     
     # Filter state
     filter_state = {
-        'data_files': None, 'location1': None, 'location2': None,
-        'product1': None, 'product2': None, 'level': None
+        'data_files': None, 'location1': 'Region', 'location2': None,
+        'product1': 'Franchise', 'product2': None, 'level': None
     }
     
     async def update_ui(filtered_df):
         """Update all UI components after filter changes"""
-        # Update charts
-        await update_charts(chart_components.column_chart_container, 
-                           chart_components.line_chart_container, filtered_df)
-        
-        # Update details table
-        await details_table.create_table(filtered_df, details_container)
+        try:
+            # Update charts
+            await update_charts(chart_components.column_chart_container,
+                               chart_components.line_chart_container, filtered_df)
+
+            # Update details table
+            await details_table.create_table(filtered_df, details_container)
+        except Exception as e:
+            ui.notify(f"Error updating UI: {str(e)}", type='negative')
+            print(f"UI update error: {e}")
     
     async def on_filter_change(filter_name, value):
         """Handle filter change events"""
@@ -67,15 +71,126 @@ def create_dashboard():
             )['products_filt']
             filter_components.update_product_options(options)
         
-        # Apply filters if both location and product are selected
-        if ((filter_state.get('location2') and filter_state.get('location1')) or 
+        # Apply filters only when both location and product filters are set
+        if ((filter_state.get('location2') and filter_state.get('location1')) and
             (filter_state.get('product2') and filter_state.get('product1'))):
+
+            # Check if data is loaded, if not, load it with size estimation
+            from state_manager import get_global_state
+            state = get_global_state()
+            if dwn.df is None or len(dwn.df) == 0:
+                # Check data size before loading
+                if await check_data_size_before_loading(filter_state):
+                    # Load data from database with filters applied
+                    await load_filtered_data(filter_state)
+                else:
+                    # Data too large, don't load
+                    return
+
+            # Apply additional filters if needed
             filtered_result = apply_filters(filter_state)
             await update_ui(filtered_result['filtered_df'])
             app.storage.user['dwn_df_json'] = filtered_result['fdf']
-    # This functionality is now handled by the DownloadDialog component
     
-    # Create UI layout using modular components
+    async def check_data_size_before_loading(filter_state):
+        """Check estimated data size before loading and warn user if too large"""
+        try:
+            from db_service import get_database_service
+
+            # Get database service
+            db_service = get_database_service()
+
+            # Estimate data size based on filters
+            estimated_rows = db_service.estimate_filtered_data_size(
+                location_col=filter_state.get('location1'),
+                location_val=filter_state.get('location2'),
+                product_col=filter_state.get('product1'),
+                product_val=filter_state.get('product2')
+            )
+
+            # Rough estimation: each row ~1KB, so 16GB = ~16M rows
+            max_rows = 16_000_000
+
+            if estimated_rows > max_rows:
+                ui.notify(
+                    f"Warning: Estimated data size ({estimated_rows:,} rows) may exceed 16GB RAM limit. "
+                    f"Please apply more specific filters or contact admin.",
+                    type='warning',
+                    duration=10
+                )
+                return False
+            elif estimated_rows > max_rows * 0.8:  # 80% of limit
+                ui.notify(
+                    f"Caution: Large dataset ({estimated_rows:,} rows) detected. "
+                    f"Loading may take time and use significant memory.",
+                    type='info',
+                    duration=5
+                )
+
+            return True
+
+        except Exception as e:
+            ui.notify(f"Could not estimate data size: {str(e)}. Proceeding with load.", type='warning')
+            return True
+
+    async def load_filtered_data(filter_state):
+        """Load data from database with filters applied to minimize memory usage"""
+        try:
+            ui.notify("Loading filtered data from database...", type='info')
+
+            from db_service import get_database_service
+            from state_manager import get_global_state
+
+            # Get database service
+            db_service = get_database_service()
+            state = get_global_state()
+
+            # Load data with filters applied at database level
+            dwn.df = db_service.get_filtered_sales_actuals(
+                location_col=filter_state.get('location1'),
+                location_val=filter_state.get('location2'),
+                product_col=filter_state.get('product1'),
+                product_val=filter_state.get('product2')
+            )
+
+            # Convert column names to match expected format
+            if 'act_orders_rev' in dwn.df.columns:
+                dwn.df = dwn.df.rename({
+                    'act_orders_rev': 'Act Orders Rev',
+                    'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
+                    'fcst_stat_final_rev': 'Fcst Stat Final Rev',
+                    'l2_stat_final_rev': 'L2 Stat Final Rev',
+                    'fcst_df_final_rev': 'Fcst DF Final Rev',
+                    'l2_df_final_rev': 'L2 DF Final Rev',
+                    'sales_date': 'SALES_DATE',
+                    'catalog_number': 'CatalogNumber',
+                    'region': 'Region',
+                    'country': 'Country',
+                    'area': 'Area',
+                    'business_unit': 'Business Unit',
+                    'franchise': 'Franchise',
+                    'ibp_level_5': 'IBP Level 5',
+                    'ibp_level_6': 'IBP Level 6'
+                })
+
+            # Cast numeric columns to Float32
+            numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev',
+                           'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev']
+            for col in numeric_cols:
+                if col in dwn.df.columns:
+                    dwn.df = dwn.df.with_columns(pl.col(col).cast(pl.Float32))
+
+            # Update state and storage
+            state.df = dwn.df.clone()
+            state.filtered_df = dwn.df.clone()
+            app.storage.user['dwn_df_json'] = dwn.df.write_json()
+
+            ui.notify(f"Successfully loaded {len(dwn.df):,} rows of filtered data", type='positive')
+
+        except Exception as e:
+            ui.notify(f"Error loading filtered data: {str(e)}", type='negative')
+            print(f"Data loading error: {e}")
+            raise
     with ui.card().classes('w-full h-full p-2'):
         # Create filter components
         filter_components = FilterComponents(filter_state, on_filter_change)

@@ -307,87 +307,111 @@ def prepare_data1(df: pl.DataFrame) -> pl.DataFrame:
         return df.fill_null(0).filter(pl.col('SALES_DATE') <= last_full_month)
 
 def apply_filters(filters, state: DataState = None):
-    """Apply filters to the dataset"""
+    """Apply filters to the dataset by querying database directly"""
     if state is None:
         state = get_global_state()
-    
-    if state.full_df is None:
+
+    # Only fetch data when both location and product filters are set
+    if not (filters.get('location2') and filters.get('location1') and
+            filters.get('product2') and filters.get('product1')):
+        # Return empty result if filters are not complete
         return {
             'fdf': '{}',
             'filtered_df': pl.DataFrame(),
             'filtered_products': [],
             'filtered_models': []
         }
-    
-    df = state.full_df.clone()  # Always start from full dataset
-    
-    # Mapping from display names to actual column names in the data
-    # These should match the column names after loading from the database
-    column_mapping = {
-        'Franchise': 'Franchise',
-        'IBP Level 5': 'IBP Level 5',  # Match the renamed column from dashboard.py
-        'IBP Level 6': 'IBP Level 6',  # Match the renamed column from dashboard.py
-        'CatalogNumber': 'CatalogNumber',
-        'Region': 'Region',
-        'Country': 'Country',
-        'Area': 'Area'
-    }
-    
-    #if filters.get('data_files'):
-    #    pass 
-    if filters.get('location2') and filters.get('location1'):
-        location_col = column_mapping.get(filters['location1'])
-        if location_col in df.columns:
-            df = df.filter(pl.col(location_col) == filters['location2'])
-    if filters.get('product2') and filters.get('product1'):
-        product_col = column_mapping.get(filters['product1'])
-        print(str(df))
-        print(product_col,"=",filters['product2'])
-        if product_col in df.columns:
-            df = df.filter(pl.col(product_col) == filters['product2'])
-    if filters.get('level'): 
-        fdf = df.clone()
-        # Use level + location1 if location1 is set, otherwise just level
-        level_col = column_mapping.get(filters['level'])
-        if level_col in df.columns:
-            group_cols = ['SALES_DATE', level_col]
-            if filters.get('location1'):
-                location_col = column_mapping.get(filters['location1'])
-                if location_col in df.columns:
-                    group_cols.append(location_col)
-            df = df.group_by(group_cols).sum()
-    else:
-        fdf = df.clone()
-        # Use product1 + location1 if location1 is set, otherwise just product1
-        product_col = column_mapping.get(filters['product1'])
-        if product_col in df.columns:
-            group_cols = ['SALES_DATE', product_col]
-            if filters.get('location1'):
-                location_col = column_mapping.get(filters['location1'])
-                if location_col in df.columns:
-                    group_cols.append(location_col)
-            df = df.group_by(group_cols).sum()
-    
-    # Update state
-    print(str(df))
-    state.update_filtered_data(df)
-    
+
     try:
-        if filters.get('product2') and filters['product2'] in df.columns:
-            filtered_products = df[filters['product2']].unique().to_list()
+        # Import database service
+        from db_service import get_database_service
+        db_service = get_database_service()
+
+        # Query database directly with filters
+        df = db_service.get_filtered_sales_actuals(
+            location_col=filters.get('location1'),
+            location_val=filters.get('location2'),
+            product_col=filters.get('product1'),
+            product_val=filters.get('product2')
+        )
+
+        # Convert column names to match expected format
+        if 'act_orders_rev' in df.columns:
+            df = df.rename({
+                'act_orders_rev': 'Act Orders Rev',
+                'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
+                'fcst_stat_final_rev': 'Fcst Stat Final Rev',
+                'l2_stat_final_rev': 'L2 Stat Final Rev',
+                'fcst_df_final_rev': 'Fcst DF Final Rev',
+                'l2_df_final_rev': 'L2 DF Final Rev',
+                'sales_date': 'SALES_DATE',
+                'catalog_number': 'CatalogNumber',
+                'region': 'Region',
+                'country': 'Country',
+                'area': 'Area',
+                'business_unit': 'Business Unit',
+                'franchise': 'Franchise',
+                'ibp_level_5': 'IBP Level 5',
+                'ibp_level_6': 'IBP Level 6'
+            })
+
+        # Cast numeric columns to Float32
+        numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev',
+                       'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev']
+        for col in numeric_cols:
+            if col in df.columns:
+                df = df.with_columns(pl.col(col).cast(pl.Float32))
+
+        # Update state with fresh data
+        state.df = df.clone()
+        state.full_df = df.clone()
+        state.filtered_df = df.clone()
+
+        # Prepare filtered result for UI display
+        if filters.get('level'):
+            fdf = df.clone()
+            # Use level + location1 if location1 is set, otherwise just level
+            level_col = 'Business Unit'  # Default level column
+            if filters.get('level') in ['Franchise', 'IBP Level 5', 'IBP Level 6']:
+                level_col = filters['level']
+
+            if level_col in df.columns:
+                group_cols = ['SALES_DATE', level_col]
+                if filters.get('location1') and filters.get('location1') != 'level':
+                    location_col = filters['location1']
+                    if location_col in df.columns:
+                        group_cols.append(location_col)
+
+                fdf = fdf.group_by(group_cols).sum()
         else:
-            filtered_products = state.filtered_products
-    except Exception:
-        filtered_products = state.filtered_products
-    
-    filtered_models = [f"Model for {product}" for product in filtered_products]
-    
-    return {
-        'fdf': fdf.write_json(),
-        'filtered_df': df,
-        'filtered_products': filtered_products,
-        'filtered_models': filtered_models
-    }
+            fdf = df.clone()
+
+        # Get filtered products for dropdown
+        try:
+            if filters.get('product1') and filters['product1'] in df.columns:
+                filtered_products = df[filters['product1']].unique().to_list()
+            else:
+                filtered_products = []
+        except Exception:
+            filtered_products = []
+
+        filtered_models = [f"Model for {product}" for product in filtered_products if product]
+
+        return {
+            'fdf': fdf.write_json(),
+            'filtered_df': fdf,
+            'filtered_products': filtered_products,
+            'filtered_models': filtered_models
+        }
+
+    except Exception as e:
+        print(f"Error in apply_filters: {e}")
+        return {
+            'fdf': '{}',
+            'filtered_df': pl.DataFrame(),
+            'filtered_products': [],
+            'filtered_models': []
+        }
 
 def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
     """Create clusters for the dataset"""

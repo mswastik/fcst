@@ -74,39 +74,23 @@ def create_dashboard():
             )['products_filt']
             filter_components.update_product_options(options)
         
-        # Apply filters when meaningful filter combinations are set
-        # Allow data loading for various combinations:
-        # 1. Both location and product filters
-        # 2. Just product filter with specific value
-        # 3. Just location filter with specific value
+        # Apply filters when both location and product filters are set
         load_data_condition = (
-            # Both location and product filters set
-            ((filter_state.get('location2') and filter_state.get('location1')) and
-             (filter_state.get('product2') and filter_state.get('product1'))) or
-            # Just product filter with specific value
-            (filter_state.get('product2') and filter_state.get('product1')) or
-            # Just location filter with specific value
-            (filter_state.get('location2') and filter_state.get('location1'))
+            (filter_state.get('location2') and filter_state.get('location1')) and
+            (filter_state.get('product2') and filter_state.get('product1'))
         )
 
         if load_data_condition:
 
-            # Check if data is loaded, if not, load it with size estimation
-            from state_manager import get_global_state
-            state = get_global_state()
-            if dwn.df is None or len(dwn.df) == 0:
-                # Check data size before loading
-                if await check_data_size_before_loading(filter_state):
-                    # Load data from database with filters applied
-                    await load_filtered_data(filter_state)
-                else:
-                    # Data too large, don't load
-                    return
-
-            # Apply additional filters if needed
-            filtered_result = apply_filters(filter_state)
-            await update_ui(filtered_result['filtered_df'])
-            app.storage.user['dwn_df_json'] = filtered_result['fdf']
+            # Check data size before loading to prevent memory issues
+            if await check_data_size_before_loading(filter_state):
+                # Apply filters by querying database directly
+                filtered_result = apply_filters(filter_state)
+                await update_ui(filtered_result['filtered_df'])
+                app.storage.user['dwn_df_json'] = filtered_result['fdf']
+            else:
+                # Data too large, don't load
+                return
     
     async def check_data_size_before_loading(filter_state):
         """Check estimated data size before loading and warn user if too large"""
@@ -143,11 +127,11 @@ def create_dashboard():
                     duration=5
                 )
 
-            return True
+            return True  # Proceed with loading
 
         except Exception as e:
-            ui.notify(f"Could not estimate data size: {str(e)}. Proceeding with load.", type='warning')
-            return True
+            ui.notify(f"Error estimating data size: {str(e)}", type='warning')
+            return True  # Proceed anyway if estimation fails
 
     async def load_filtered_data(filter_state):
         """Load data from database with filters applied to minimize memory usage"""

@@ -31,11 +31,11 @@ class FilterComponents:
             self._create_location_selects()
             self._create_product_selects()
             self._create_level_select()
-            self._create_data_files_select()
+            #self._create_data_files_select()
             self._create_get_data_button()
-    
+    """
     def _create_data_files_select(self):
-        """Create data files selection dropdown - now loads from DuckDB."""
+        '''Create data files selection dropdown - now loads from DuckDB.'''
         '''return ui.select(
             label='Load Data',
             options=['Load from Database'],
@@ -46,6 +46,7 @@ class FilterComponents:
             'Load Data',
             on_click=lambda e: self.on_filter_change('data_files', e)
         ).classes('ml-5 mt-3')
+    """
     
     def _create_location_selects(self):
         """Create location filter dropdowns."""
@@ -62,7 +63,7 @@ class FilterComponents:
             options=self.options['locations_filt'],
             with_input=True,
             on_change=lambda e: self.on_filter_change('location2', e.value)
-        ).classes('w-40').bind_value(self.filter_state, 'location2')
+        ).classes('w-40')  #.bind_value(self.filter_state, 'location2')
         
         return location_select1, self.location_select2
     

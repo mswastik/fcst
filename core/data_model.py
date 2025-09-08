@@ -2,7 +2,7 @@ import pandas as pd
 import polars as pl
 import random
 from datetime import datetime, timedelta
-from state_manager import get_global_state, DataState
+from core.state_manager import get_global_state, DataState
 from typing import Optional, Dict, Any
 
 # Get the global state instance
@@ -45,7 +45,7 @@ def generate_sample_data(path: str = None) -> pl.DataFrame:
         return state.load_sample_data(path)
 def get_filter_options(prod: Optional[str] = None, loc: Optional[str] = None) -> Dict[str, Any]:
     """Return filter options for UI dropdowns"""
-    from db_service import get_database_service
+    from core.db_service import get_database_service
     
     # Get options directly from database for better reliability
     db_service = get_database_service()

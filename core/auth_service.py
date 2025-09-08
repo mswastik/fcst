@@ -133,7 +133,7 @@ def login_page(redirect_to: str = '/'):
         return
 
     with ui.card().classes('absolute-center'):
-        ui.label('ML Integration App').classes('text-2xl text-center mb-4')
+        ui.label('Company Forecasting App').classes('text-2xl text-center mb-4')
         ui.label('Please sign in with your Microsoft account').classes('text-center mb-6')
 
         ui.button(
@@ -142,7 +142,7 @@ def login_page(redirect_to: str = '/'):
             icon='login'
         ).classes('w-full').props('color=primary')
 
-        ui.label('SSO Login is not yet implemented as it requires app to get registered with Microsoft').classes('text-red-600 mt-4 text-center')
+        ui.label('Access restricted to authorized personnel only').classes('text-xs text-gray-500 mt-4 text-center')
 
 
 @ui.page('/logout')

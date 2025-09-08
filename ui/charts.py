@@ -1,19 +1,17 @@
 from nicegui import ui
-from data_model import get_chart_data
-from state_manager import get_global_state
+from core.data_model import get_chart_data
+from core.state_manager import get_global_state
+from core.utils import UIUtils
 import polars as pl
 
 def render_column_chart(container,filtered_df):
     """Render column chart in the provided container with loading indicator"""
     container.clear()
     state = get_global_state()
-    
+
     with container:
         if state.is_loading('charts'):
-            # Show loading indicator
-            with ui.row().classes('w-full h-full justify-center items-center'):
-                ui.spinner(size='lg')
-                ui.label(state.loading_message or 'Loading chart data...').classes('ml-2 text-gray-600')
+            UIUtils.show_loading_indicator(container, state.loading_message or 'Loading chart data...')
         else:
             data = get_chart_data('column',filtered_df)
             if data:
@@ -33,13 +31,10 @@ def render_line_chart(container,filtered_df):
     """Render line chart in the provided container with loading indicator"""
     container.clear()
     state = get_global_state()
-    
+
     with container:
         if state.is_loading('charts'):
-            # Show loading indicator
-            with ui.row().classes('w-full h-full justify-center items-center'):
-                ui.spinner(size='lg')
-                ui.label(state.loading_message or 'Loading chart data...').classes('ml-2 text-gray-600')
+            UIUtils.show_loading_indicator(container, state.loading_message or 'Loading chart data...')
         else:
             data = get_chart_data('line',filtered_df)
             if data:

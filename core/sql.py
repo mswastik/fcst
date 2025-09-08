@@ -5,17 +5,12 @@ import polars as pl
 import os
 from nicegui import run
 import pyodbc
+from utils import ErrorHandler
 drivers =sorted(pyodbc.drivers())
 d=[i for i in drivers if i.find('ODBC Driver')!=-1]
 
 today=datetime.today()
 path = os.path.expanduser("~")+'/fcst'
-#try:
-#    os.mkdir(path)
-#    past_months=-3
-#except:
-#    past_months=-12
-ss="gda-globalsynapseanalytics-ws-prod.sql.azuresynapse.net"
 
 def sales_actuals():
     query=f'''
@@ -97,25 +92,6 @@ def sqlpd(loc='',reg='',prod='',fn='',pm=6,nm=6):
         print(df1)
         df1=df1.with_columns(pl.col('SALES_DATE').cast(pl.Datetime).dt.cast_time_unit('us'))
         df1.write_csv(f'C:\\Users\\{os.getlogin()}\\Downloads\\temp.csv')
-        try:
-            df=pl.read_parquet(f'data/{fn}.parquet')
-            df=df.filter(pl.col('SALES_DATE')<=datetime(today.year,today.month,1)-relativedelta(months=3))
-            df=pl.concat([df,df1])
-            df.write_parquet(f'data/{fn}.parquet')
-        except:
-            df1.write_parquet(f'data/{fn}.parquet')
-        try:
-            ph=pl.read_parquet(f'data/phierarchy.parquet')
-            ph=pl.concat(ph,df1['Business Sector','Franchise','Business Unit','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','CatalogNumber'].unique())
-            ph.unique().write_parquet(f'data/phierarchy.parquet')
-        except:
-            df1['Business Sector','Franchise','Business Unit','Product Line','IBP Level 5','IBP Level 6','IBP Level 7','CatalogNumber'].unique().write_parquet(f'data/phierarchy.parquet')
-        try:
-            lh=pl.read_parquet(f'data/lhierarchy.parquet')
-            lh=pl.concat(lh,df1['Stryker Group Region','Area','Region','Country'].unique())
-            lh.unique().write_parquet(f'data/lhierarchy.parquet')
-        except:
-            df1['Stryker Group Region','Area','Region','Country'].unique().write_parquet(f'data/lhierarchy.parquet')
     except Exception as e:
         print(f"Arrow ODBC Error: {e}")
     return False
@@ -136,7 +112,6 @@ async def phierarchy():
         df1= pl.concat([df1,await run.io_bound(pl.from_arrow,batch)])
     print('Done!!!')
     df1=df1.unique()
-    df1.write_parquet(f'data//phierarchy.parquet')
 
 async def lhierarchy():
     query=f'''
@@ -153,7 +128,6 @@ async def lhierarchy():
         df1= pl.concat([df1,await run.io_bound(pl.from_arrow,batch)])
     print('Done!!!')
     df1=df1.unique()
-    df1.write_parquet(f'data//lhierarchy.parquet')
 
 def query_st(loc='',reg='',prod='',fn='',pm=6,nm=6):
     query=f'''

@@ -1,7 +1,7 @@
 from nicegui import ui, app, run
 from ui.dashboard import create_dashboard
-from state_manager import initialize_global_state
-from auth_service import auth_service, AuthMiddleware
+from core.state_manager import initialize_global_state
+from core.auth_service import auth_service, AuthMiddleware
 from fastapi import FastAPI
 import concurrent.futures
 import sys

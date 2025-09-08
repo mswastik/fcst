@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 import polars as pl
 from dataclasses import dataclass, field
 from datetime import datetime
-from db_service import get_database_service
+from core.utils import DataUtils, DatabaseUtils, ErrorHandler
 
 
 @dataclass
@@ -84,41 +84,21 @@ class DataState:
     def load_sample_data(self, path: str = None) -> pl.DataFrame:
         """Load sample data from DuckDB database."""
         try:
-            db_service = get_database_service()
+            db_service = DatabaseUtils.get_database_service()
+            if db_service is None:
+                return None
+
             # Load sales actuals with joined hierarchy data
             self.df = db_service.get_sales_actuals()
-            
-            # Convert column names to match expected format
-            if 'act_orders_rev' in self.df.columns:
-                self.df = self.df.rename({
-                    'act_orders_rev': 'Act Orders Rev',
-                    'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
-                    'fcst_stat_final_rev': 'Fcst Stat Final Rev',
-                    'l2_stat_final_rev': 'L2 Stat Final Rev',
-                    'fcst_df_final_rev': 'Fcst DF Final Rev',
-                    'l2_df_final_rev': 'L2 DF Final Rev',
-                    'sales_date': 'SALES_DATE',
-                    'catalog_number': 'CatalogNumber',
-                    'region': 'Region',
-                    'country': 'Country',
-                    'area': 'Area',
-                    'business_unit': 'Business Unit',
-                    'franchise': 'Franchise',
-                    'ibp_level_5': 'IBP Level 5',
-                    'ibp_level_6': 'IBP Level 6'
-                })
-            
-            # Cast numeric columns to Float32
-            numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev', 
-                           'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev']
-            for col in numeric_cols:
-                if col in self.df.columns:
-                    self.df = self.df.with_columns(pl.col(col).cast(pl.Float32))
-            
+
+            # Apply standard data preparation
+            self.df = DataUtils.prepare_data_for_ui(self.df)
+
             self.full_df = self.df.clone()  # Store original full dataset
             self.filtered_df = self.df.clone()
             return self.df
         except Exception as e:
+            ErrorHandler.handle_data_loading_error(e, "Sample data loading")
             raise ValueError(f"Failed to load data from database: {e}")
     
     def get_filter_options(self, prod: str = None, loc: str = None) -> Dict[str, Any]:
@@ -163,7 +143,10 @@ class DataState:
                 }
             else:
                 # Load filter options from database when no data is loaded yet
-                db_service = get_database_service()
+                db_service = DatabaseUtils.get_database_service()
+                if db_service is None:
+                    return self._get_default_filter_options()
+                
                 filter_options = db_service.get_filter_options()
                 
                 # Map the requested product/location to appropriate database fields
@@ -194,8 +177,10 @@ class DataState:
                 }
         except Exception as e:
             print(f"Error getting filter options: {e}")
-        
-        # Return default options as fallback
+            return self._get_default_filter_options()
+    
+    def _get_default_filter_options(self) -> Dict[str, Any]:
+        """Return default filter options as fallback."""
         return {
             'products_filt': [],
             'locations_filt': [],

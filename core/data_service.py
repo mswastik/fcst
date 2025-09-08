@@ -4,11 +4,10 @@ Provides data loading, processing, and forecasting functionality.
 """
 import polars as pl
 from typing import Optional, Dict, Any, List, Tuple
-from state_manager import DataState, get_global_state
-from db_service import get_database_service
+from core.state_manager import DataState, get_global_state
+from core.utils import DataUtils, DatabaseUtils, ErrorHandler
 from neuralforecast import NeuralForecast
 from neuralforecast.models import NHITS
-#from neuralforecast.auto import AutoNHITS
 from neuralforecast.losses.pytorch import RMSE
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, silhouette_score
@@ -183,8 +182,9 @@ def create_enhanced_clusters(df: pl.DataFrame, file_path: str, state: DataState 
     df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
     
     # Save clusters to database instead of parquet
-    db_service = get_database_service()
-    db_service.upsert_clusters(df)
+    db_service = DatabaseUtils.get_database_service()
+    if db_service:
+        db_service.upsert_clusters(df)
     
     # Update state
     state.df = df
@@ -372,9 +372,10 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                     
                     # Save forecasts to database
                     print("Attempting to save forecasts to database...")
-                    db_service = get_database_service()
-                    saved_count = db_service.insert_forecasts(forecast_df, model_type="Ensemble")
-                    print(f"Successfully saved {saved_count} forecast records to database")
+                    db_service = DatabaseUtils.get_database_service()
+                    if db_service:
+                        saved_count = db_service.insert_forecasts(forecast_df, model_type="Ensemble")
+                        print(f"Successfully saved {saved_count} forecast records to database")
                     
                     validation_results = {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0, 'forecasts_generated': len(forecast_df), 'forecasts_saved': saved_count}
                     print(f"Models created successfully. Validation results: {validation_results}")
@@ -517,8 +518,14 @@ def apply_filters(filters, state: DataState = None):
 
     try:
         # Import database service
-        from db_service import get_database_service
-        db_service = get_database_service()
+        db_service = DatabaseUtils.get_database_service()
+        if db_service is None:
+            return {
+                'fdf': '{}',
+                'filtered_df': pl.DataFrame(),
+                'filtered_products': [],
+                'filtered_models': []
+            }
 
         # Query database directly with filters
         df = db_service.get_filtered_sales_actuals(
@@ -528,32 +535,8 @@ def apply_filters(filters, state: DataState = None):
             product_val=filters.get('product2')
         )
 
-        # Convert column names to match expected format
-        if 'act_orders_rev' in df.columns:
-            df = df.rename({
-                'act_orders_rev': 'Act Orders Rev',
-                'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
-                'fcst_stat_final_rev': 'Fcst Stat Final Rev',
-                'l2_stat_final_rev': 'L2 Stat Final Rev',
-                'fcst_df_final_rev': 'Fcst DF Final Rev',
-                'l2_df_final_rev': 'L2 DF Final Rev',
-                'sales_date': 'SALES_DATE',
-                'catalog_number': 'CatalogNumber',
-                'region': 'Region',
-                'country': 'Country',
-                'area': 'Area',
-                'business_unit': 'Business Unit',
-                'franchise': 'Franchise',
-                'ibp_level_5': 'IBP Level 5',
-                'ibp_level_6': 'IBP Level 6'
-            })
-
-        # Cast numeric columns to Float32
-        numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev',
-                       'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev']
-        for col in numeric_cols:
-            if col in df.columns:
-                df = df.with_columns(pl.col(col).cast(pl.Float32))
+        # Apply standard data preparation
+        df = DataUtils.prepare_data_for_ui(df)
 
         # Update state with fresh data
         state.df = df.clone()
@@ -630,8 +613,9 @@ def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -
     df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
     
     # Save clusters to database instead of parquet
-    db_service = get_database_service()
-    db_service.upsert_clusters(df)
+    db_service = DatabaseUtils.get_database_service()
+    if db_service:
+        db_service.upsert_clusters(df)
     
     # Update state with clustered data
     state.df = df

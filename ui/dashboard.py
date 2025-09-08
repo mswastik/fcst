@@ -1,14 +1,11 @@
 from nicegui import ui,run,app
-from data_model import get_filter_options, generate_sample_data
-from data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
-from state_manager import get_global_state
-#from sql import sqlpd,query_st
+from core.data_model import get_filter_options, generate_sample_data
+from core.data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
+from core.state_manager import get_global_state
+from core.utils import DataUtils, DatabaseUtils, UIUtils, ErrorHandler
 from ui.charts import update_charts
 import os
-#import asyncio
 import polars as pl
-#import json
-#import io
 from datetime import datetime, timedelta
 
 if not os.path.exists('data/'):
@@ -49,24 +46,23 @@ def create_dashboard():
             state = get_global_state()
             state.set_loading_state('charts', True, 'Updating charts...')
             state.set_loading_state('table', True, 'Updating table...')
-            
+
             # Force UI update to show loading indicators
             await ui.run_javascript('void 0', timeout=0.1)
-            
+
             # Update charts
             await update_charts(chart_components.column_chart_container,
                                chart_components.line_chart_container, filtered_df)
 
             # Update details table
             await details_table.create_table(filtered_df, details_container)
-            
+
         except Exception as e:
             # Clear loading states on error
             state = get_global_state()
             state.set_loading_state('charts', False)
             state.set_loading_state('table', False)
-            ui.notify(f"Error updating UI: {str(e)}", type='negative')
-            print(f"UI update error: {e}")
+            ErrorHandler.handle_ui_update_error(e, "UI update")
     
     async def on_filter_change(filter_name, value):
         """Handle filter change events"""
@@ -120,10 +116,9 @@ def create_dashboard():
     async def check_data_size_before_loading(filter_state):
         """Check estimated data size before loading and warn user if too large"""
         try:
-            from db_service import get_database_service
-
-            # Get database service
-            db_service = get_database_service()
+            db_service = DatabaseUtils.get_database_service()
+            if db_service is None:
+                return True
 
             # Estimate data size based on filters - handle partial filters
             estimated_rows = db_service.estimate_filtered_data_size(
@@ -137,42 +132,38 @@ def create_dashboard():
             max_rows = 16_000_000
 
             if estimated_rows > max_rows:
-                ui.notify(
+                UIUtils.show_error_message(
                     f"Warning: Estimated data size ({estimated_rows:,} rows) may exceed 16GB RAM limit. "
                     f"Please apply more specific filters or contact admin.",
-                    type='warning',
-                    duration=10
+                    type='warning'
                 )
                 return False
             elif estimated_rows > max_rows * 0.8:  # 80% of limit
-                ui.notify(
+                UIUtils.show_info_message(
                     f"Caution: Large dataset ({estimated_rows:,} rows) detected. "
-                    f"Loading may take time and use significant memory.",
-                    type='info',
-                    duration=5
+                    f"Loading may take time and use significant memory."
                 )
 
             return True  # Proceed with loading
 
         except Exception as e:
-            ui.notify(f"Error estimating data size: {str(e)}", type='warning')
+            UIUtils.show_error_message(f"Error estimating data size: {str(e)}", type='warning')
             return True  # Proceed anyway if estimation fails
 
     async def load_filtered_data(filter_state):
         """Load data from database with filters applied to minimize memory usage"""
         try:
-            ui.notify("Loading filtered data from database...", type='info')
+            UIUtils.show_info_message("Loading filtered data from database...")
 
-            from db_service import get_database_service
-            from state_manager import get_global_state
+            db_service = DatabaseUtils.get_database_service()
+            if db_service is None:
+                return
 
-            # Get database service
-            db_service = get_database_service()
             state = get_global_state()
 
             # Set loading state for data
             state.set_loading_state('data', True, 'Fetching data from database...')
-            
+
             # Load data with filters applied at database level
             dwn.df = db_service.get_filtered_sales_actuals(
                 location_col=filter_state.get('location1'),
@@ -181,32 +172,8 @@ def create_dashboard():
                 product_val=filter_state.get('product2')
             )
 
-            # Convert column names to match expected format
-            if 'act_orders_rev' in dwn.df.columns:
-                dwn.df = dwn.df.rename({
-                    'act_orders_rev': 'Act Orders Rev',
-                    'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
-                    'fcst_stat_final_rev': 'Fcst Stat Final Rev',
-                    'l2_stat_final_rev': 'L2 Stat Final Rev',
-                    'fcst_df_final_rev': 'Fcst DF Final Rev',
-                    'l2_df_final_rev': 'L2 DF Final Rev',
-                    'sales_date': 'SALES_DATE',
-                    'catalog_number': 'CatalogNumber',
-                    'region': 'Region',
-                    'country': 'Country',
-                    'area': 'Area',
-                    'business_unit': 'Business Unit',
-                    'franchise': 'Franchise',
-                    'ibp_level_5': 'IBP Level 5',
-                    'ibp_level_6': 'IBP Level 6'
-                })
-
-            # Cast numeric columns to Float32
-            numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev',
-                           'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev']
-            for col in numeric_cols:
-                if col in dwn.df.columns:
-                    dwn.df = dwn.df.with_columns(pl.col(col).cast(pl.Float32))
+            # Apply standard data preparation
+            dwn.df = DataUtils.prepare_data_for_ui(dwn.df)
 
             # Update state and storage
             state.df = dwn.df.clone()
@@ -214,11 +181,10 @@ def create_dashboard():
             state.filtered_df = dwn.df.clone()
             app.storage.user['dwn_df_json'] = dwn.df.write_json()
 
-            ui.notify(f"Successfully loaded {len(dwn.df):,} rows of filtered data", type='positive')
+            UIUtils.show_success_message(f"Successfully loaded {len(dwn.df):,} rows of filtered data")
 
         except Exception as e:
-            ui.notify(f"Error loading filtered data: {str(e)}", type='negative')
-            print(f"Data loading error: {e}")
+            ErrorHandler.handle_data_loading_error(e, "Filtered data loading")
             raise
         finally:
             # Clear loading state

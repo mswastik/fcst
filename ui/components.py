@@ -7,11 +7,12 @@ import polars as pl
 import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Callable, Optional
-from state_manager import get_global_state
-from data_model import get_filter_options, generate_sample_data
-from data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
+from core.state_manager import get_global_state
+from core.data_model import get_filter_options, generate_sample_data
+from core.data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
 from forecasting.model_validator import ModelValidator, ValidationReportGenerator
-from auth_service import auth_service
+from core.auth_service import auth_service
+from core.utils import DataUtils, DatabaseUtils, UIUtils, ErrorHandler
 
 
 class AuthHeader:
@@ -83,7 +84,7 @@ class FilterComponents:
         self.filter_state = filter_state
         self.on_filter_change = on_filter_change
         # Get filter options from the global state
-        from state_manager import get_global_state
+        from core.state_manager import get_global_state
         state = get_global_state()
         self.options = state.get_filter_options()
     
@@ -158,8 +159,8 @@ class FilterComponents:
         self.product_select2._props.update({'label': value})
         
         # Get updated options based on the selected hierarchy level
-        from state_manager import get_global_state
-        from data_model import get_filter_options
+        from core.state_manager import get_global_state
+        from core.data_model import get_filter_options
         
         # Use the data_model function which properly handles the database lookup
         options = get_filter_options(prod=value, loc=self.filter_state.get('location1'))
@@ -317,56 +318,53 @@ class ActionButtons:
     async def _run_cluster(self):
         """Handle clustering action."""
         # Get filtered data from global state for clustering
-        from state_manager import get_global_state
         state = get_global_state()
         filtered_df = state.filtered_df if state.filtered_df is not None else self.dwn_data.df
-        
+
         if filtered_df is None or len(filtered_df) == 0:
-            ui.notify('No data available for clustering. Please load and filter data first.', type='warning')
+            UIUtils.show_error_message('No data available for clustering. Please load and filter data first.', type='warning')
             return
-        
+
         # Show progress notification
-        n = ui.notification(timeout=None)
+        n = UIUtils.create_loading_notification()
         n.message = "Creating clusters... This may take a few minutes."
-        n.spinner = True
-        
+
         try:
             # Set loading states for all components
             state.set_loading_state('charts', True, 'Running...')
             state.set_loading_state('table', True, 'Running...')
             state.set_loading_state('data', True, 'Running...')
-            
+
             # Create a simple wrapper for clustering that uses filtered data
             async def cluster_wrapper():
-                from data_service import create_clusters
+                from core.data_service import create_clusters
                 result = create_clusters(filtered_df, "", state)
-                
+
                 # Verify data was saved to database
-                from db_service import get_database_service
-                db_service = get_database_service()
-                cluster_count = db_service.get_cluster_count()
-                print(f"Clusters saved to database. Total cluster records: {cluster_count}")
-                
+                db_service = DatabaseUtils.get_database_service()
+                if db_service:
+                    cluster_count = db_service.get_cluster_count()
+                    print(f"Clusters saved to database. Total cluster records: {cluster_count}")
+
                 return result
-            
+
             self.dwn_data.df = await cluster_wrapper()
-            
+
             n.message = 'Clustering completed successfully!'
             n.spinner = False
             n.dismiss()
-            ui.notify('Clusters created and saved to database!', type='success')
-            
+            UIUtils.show_success_message('Clusters created and saved to database!')
+
             # Update UI with new data
             from ui.charts import update_charts
             from ui.dashboard import details_table, chart_components, details_container
             await update_charts(chart_components.column_chart_container,
                                chart_components.line_chart_container, self.dwn_data.df)
             await details_table.create_table(self.dwn_data.df, details_container)
-            
+
         except Exception as e:
             n.dismiss()
-            ui.notify(f'Clustering failed: {str(e)}', type='negative')
-            print(f"Clustering error: {e}")
+            ErrorHandler.handle_ui_update_error(e, "Clustering")
         finally:
             # Clear all loading states
             state.set_loading_state('charts', False)
@@ -376,59 +374,56 @@ class ActionButtons:
     async def _run_create_models(self):
         """Handle model creation action."""
         # Get filtered data from global state
-        from state_manager import get_global_state
         state = get_global_state()
         filtered_df = state.filtered_df if state.filtered_df is not None else self.dwn_data.df
-        
+
         if filtered_df is None or len(filtered_df) == 0:
-            ui.notify('No data available for forecasting. Please load and filter data first.', type='warning')
+            UIUtils.show_error_message('No data available for forecasting. Please load and filter data first.', type='warning')
             return
-        
+
         # Show detailed progress notification
-        n = ui.notification(timeout=None)
+        n = UIUtils.create_loading_notification()
         n.message = "Initializing forecasting pipeline..."
-        n.spinner = True
-        
+
         try:
             # Set loading states for all components
             state.set_loading_state('charts', True, 'Running forecasting models...')
             state.set_loading_state('table', True, 'Running forecasting models...')
             state.set_loading_state('data', True, 'Running forecasting models...')
-            
+
             # Update progress
             n.message = "Processing data and running forecasting models... This may take several minutes."
-            
+
             # Use the correct function from data_service instead of simple_pipeline
             result_df, validation_results = await run.cpu_bound(
                 create_models_action,
                 filtered_df, "", state
             )
-            
+
             # Update progress
             n.message = "Saving results to database..."
-            
+
             # Handle the result
             if result_df is not None:
                 self.dwn_data.df = result_df
                 # Update global state with the processed data
                 state.df = result_df
-                
+
                 # Verify data was saved to database
-                from db_service import get_database_service
-                db_service = get_database_service()
-                
-                # Check if forecasts were saved (if forecast table exists)
-                try:
-                    forecast_count = db_service.get_forecast_count()
-                    print(f"Forecasts saved to database. Total forecast records: {forecast_count}")
-                except:
-                    print("Forecast table not yet implemented, but clustering data was processed")
-                
+                db_service = DatabaseUtils.get_database_service()
+                if db_service:
+                    # Check if forecasts were saved (if forecast table exists)
+                    try:
+                        forecast_count = db_service.get_forecast_count()
+                        print(f"Forecasts saved to database. Total forecast records: {forecast_count}")
+                    except:
+                        print("Forecast table not yet implemented, but clustering data was processed")
+
                 n.message = 'Forecasting completed successfully!'
                 n.spinner = False
                 n.dismiss()
-                ui.notify('Models created and results saved to database!', type='success')
-                
+                UIUtils.show_success_message('Models created and results saved to database!')
+
                 # Update UI with new data
                 from ui.charts import update_charts
                 from ui.dashboard import details_table, chart_components, details_container
@@ -437,12 +432,11 @@ class ActionButtons:
                 await details_table.create_table(result_df, details_container)
             else:
                 n.dismiss()
-                ui.notify('Forecasting completed but no results returned', type='warning')
-                
+                UIUtils.show_info_message('Forecasting completed but no results returned')
+
         except Exception as e:
             n.dismiss()
-            ui.notify(f'Forecasting failed: {str(e)}', type='negative')
-            print(f"Forecasting error: {e}")
+            ErrorHandler.handle_ui_update_error(e, "Forecasting")
         finally:
             # Clear all loading states
             state.set_loading_state('charts', False)
@@ -451,37 +445,35 @@ class ActionButtons:
     
     def _change_forecast(self):
         """Handle forecast change action."""
-        ui.notify(change_fc_action(), type='info')
+        UIUtils.show_info_message(change_fc_action())
     
     # ... (rest of the code remains the same)
     async def _run_validation(self):
         """Handle model validation action."""
         if not hasattr(self.dwn_data, 'df') or self.dwn_data.df is None or len(self.dwn_data.df) == 0:
-            ui.notify('No data available for validation. Please load data first.', type='warning')
+            UIUtils.show_error_message('No data available for validation. Please load data first.', type='warning')
             return
-        
-        n = ui.notification(timeout=None)
+
+        n = UIUtils.create_loading_notification()
         n.message = "Running model validation for last 3 months..."
-        n.spinner = True
-        
+
         try:
             validator = ModelValidator()
             # Use filtered data for validation
-            from state_manager import get_global_state
             state = get_global_state()
             filtered_df = state.filtered_df if state.filtered_df is not None else self.dwn_data.df
-            
+
             validation_results = await run.cpu_bound(
                 validator.validate_last_3_months,
                 filtered_df.to_dict(as_series=False)
             )
-            
+
             n.dismiss()
             ValidationResultsDialog(validation_results).show()
-            
+
         except Exception as e:
             n.dismiss()
-            ui.notify(f'Validation failed: {str(e)}', type='negative')
+            ErrorHandler.handle_ui_update_error(e, "Model validation")
     
     def _show_view_dialog(self):
         """Show the view data dialog."""
@@ -551,6 +543,9 @@ class ViewDataDialog:
             # Fallback without schema if specific schema fails
             full_df = pl.read_json(temp_file, infer_schema_length=None)
         
+        # Apply standard data preparation
+        full_df = DataUtils.prepare_data_for_ui(full_df)
+
         # Convert date and numeric columns
         if 'SALES_DATE' in full_df.columns:
             full_df = full_df.with_columns(pl.col('SALES_DATE').str.to_datetime())
@@ -645,32 +640,30 @@ class DetailsTable:
         """Create and populate the data table with loading indicator."""
         if self.table_container is None:
             return
-        
+
         # Show loading state
         state = get_global_state()
         state.set_loading_state('table', True, 'Loading table data...')
-        
+
         # Clear existing content and show loading
         self.table_container.clear()
         with self.table_container:
-            with ui.row().classes('w-full h-full justify-center items-center p-8'):
-                ui.spinner(size='lg')
-                ui.label('Loading table data...').classes('ml-2 text-gray-600')
-        
+            UIUtils.show_loading_indicator(self.table_container, 'Loading table data...')
+
         # Force UI update to show loading state
         await ui.run_javascript('void 0', timeout=0.1)
-        
+
         try:
             if len(filtered_df) == 0:
                 self.table_container.clear()
                 with self.table_container:
                     ui.label('No data available').classes('text-center text-gray-500 p-8')
                 return
-            
+
             self.table_container.clear()
             with self.table_container:
                 f1 = filtered_df.with_columns(pl.col('SALES_DATE').dt.date())
-                
+
                 # Create the appropriate table based on filter state
                 if self.filter_state['level']:
                     table_df = f1.pivot(
@@ -696,7 +689,7 @@ class DetailsTable:
                         if col in f1.columns:
                             index_col = col
                             break
-                    
+
                     if index_col:
                         table_df = f1.pivot(
                             'SALES_DATE',
@@ -710,7 +703,7 @@ class DetailsTable:
                         table_df = f1.group_by('SALES_DATE').agg(
                             pl.col('Act Orders Rev').sum()
                         ).sort('SALES_DATE')
-                
+
                 ui.table.from_polars(table_df, pagination=10).classes('w-full').props('virtual-scroll').on('rowClick', self._on_row_click)
         finally:
             # Clear loading state

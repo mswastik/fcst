@@ -10,8 +10,70 @@ from typing import Dict, Any, Callable, Optional
 from state_manager import get_global_state
 from data_model import get_filter_options, generate_sample_data
 from data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
-from simple_pipeline import standalone_forecasting_pipeline
 from forecasting.model_validator import ModelValidator, ValidationReportGenerator
+from auth_service import auth_service
+
+
+class AuthHeader:
+    """Handles authentication header component with login/logout functionality."""
+
+    def create_header(self):
+        """Create the authentication header with user info and login/logout buttons."""
+        with ui.header().classes('bg-white shadow-sm border-b'):
+            with ui.row().classes('w-full justify-between items-center px-4 py-0'):
+                # App title
+                ui.label('ML Integration').classes('text-lg font-bold text-gray-800')
+
+                # User info and authentication buttons
+                with ui.row().classes('items-center gap-4'):
+                    self._create_user_info()
+                    self._create_auth_buttons()
+
+    def _create_user_info(self):
+        """Create user information display."""
+        user_info = auth_service.get_user_info()
+
+        if user_info.get('authenticated'):
+            # Show authenticated user info
+            with ui.row().classes('items-center gap-x-2'):
+                ui.icon('account_circle').classes('text-blue-600')
+                ui.label(f"Welcome, {user_info.get('username', 'User')}").classes('text-sm text-gray-700')
+                if user_info.get('email'):
+                    ui.label(user_info['email']).classes('text-xs text-gray-500')
+        else:
+            # Show not authenticated message
+            with ui.row().classes('items-center gap-x-2'):
+                ui.icon('warning').classes('text-orange-500')
+                ui.label('Not authenticated').classes('text-sm text-gray-600')
+
+    def _create_auth_buttons(self):
+        """Create login/logout buttons based on authentication status."""
+        user_info = auth_service.get_user_info()
+
+        if user_info.get('authenticated'):
+            # Logout button
+            ui.button(
+                'Logout',
+                on_click=self._handle_logout,
+                icon='logout'
+            ).classes('text-sm').props('color=secondary outline')
+        else:
+            # Login button
+            ui.button(
+                'Login',
+                on_click=self._handle_login,
+                icon='login'
+            ).classes('text-sm').props('color=primary')
+
+    def _handle_login(self):
+        """Handle login button click."""
+        ui.navigate.to('/login')
+
+    def _handle_logout(self):
+        """Handle logout button click."""
+        auth_service.logout()
+        ui.navigate.to('/login')
+        ui.notify('Logged out successfully', type='info')
 
 
 class FilterComponents:
@@ -314,19 +376,20 @@ class ActionButtons:
             # Update progress
             n.message = "Processing data and running forecasting models... This may take several minutes."
             
-            result_dict, validation_results = await run.cpu_bound(
-                standalone_forecasting_pipeline, 
-                filtered_df.to_dict(as_series=False)
+            # Use the correct function from data_service instead of simple_pipeline
+            result_df, validation_results = await run.cpu_bound(
+                create_models_action,
+                filtered_df, "", state
             )
             
             # Update progress
             n.message = "Saving results to database..."
             
-            # Reconstruct dataframe from dictionary result
-            if result_dict is not None:
-                self.dwn_data.df = pl.DataFrame(result_dict)
+            # Handle the result
+            if result_df is not None:
+                self.dwn_data.df = result_df
                 # Update global state with the processed data
-                state.df = self.dwn_data.df
+                state.df = result_df
                 
                 # Verify data was saved to database
                 from db_service import get_database_service

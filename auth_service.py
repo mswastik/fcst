@@ -13,12 +13,12 @@ from nicegui import app, ui
 class AuthService:
     """Handles Microsoft OAuth2 authentication"""
 
-    def __init__(self):
+    def __init__(self, app_instance=None):
         self.oauth = OAuth()
         # Microsoft OAuth2 configuration
         self.client_id = os.getenv('MICROSOFT_CLIENT_ID', 'your-client-id')
         self.client_secret = os.getenv('MICROSOFT_CLIENT_SECRET', 'your-client-secret')
-        self.tenant_id = os.getenv('MICROSOFT_TENANT_ID', 'common')  # 'common' for multi-tenant
+        self.tenant_id = os.getenv('MICROSOFT_TENANT_ID', '4e9dbbfb-394a-4583-8810-53f81f819e3b')  # 'common' for multi-tenant
 
         # Register Microsoft OAuth
         self.oauth.register(
@@ -106,8 +106,27 @@ class AuthMiddleware(BaseHTTPMiddleware):
 def login_page(redirect_to: str = '/'):
     """Login page with Microsoft OAuth2"""
     def initiate_microsoft_login():
-        # This will be handled by the FastAPI route
-        ui.navigate.to('/auth/login')
+        """Handle Microsoft login button click"""
+        print("Login button clicked - initiating OAuth flow")
+        try:
+            # Check if environment variables are set
+            client_id = os.getenv('MICROSOFT_CLIENT_ID')
+            tenant_id = os.getenv('MICROSOFT_TENANT_ID')
+            client_secret = os.getenv('MICROSOFT_CLIENT_SECRET')
+
+            print(f"Client ID set: {bool(client_id)}")
+            print(f"Tenant ID set: {bool(tenant_id)}")
+            print(f"Client Secret set: {bool(client_secret)}")
+
+            if not client_id or client_id == 'your-client-id':
+                ui.notify('Microsoft OAuth not configured. Please set MICROSOFT_CLIENT_ID environment variable.', type='negative')
+                return
+
+            # Navigate to auth endpoint
+            ui.navigate.to('/auth/login')
+        except Exception as e:
+            print(f"Error in login initiation: {e}")
+            ui.notify(f'Login initiation failed: {str(e)}', type='negative')
 
     if auth_service.is_authenticated(None):
         ui.navigate.to(redirect_to)

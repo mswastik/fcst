@@ -16,8 +16,8 @@ class DataCleaner:
         """Prepare data with proper handling of missing values and outliers."""
         # Remove outliers using IQR method
         df = df.with_columns(
-            q1=pl.col('`Act Orders Rev').quantile(0.25).over('unique_id'),
-            q3=pl.col('`Act Orders Rev').quantile(0.75).over('unique_id')
+            q1=pl.col('Act Orders Rev').quantile(0.25).over('unique_id'),
+            q3=pl.col('Act Orders Rev').quantile(0.75).over('unique_id')
         )
         df = df.with_columns(iqr=pl.col('q3') - pl.col('q1'))
         df = df.with_columns(lower_bound=pl.col('q1') - 1.5 * pl.col('iqr'))
@@ -25,12 +25,12 @@ class DataCleaner:
         
         # Cap outliers instead of removing them
         df = df.with_columns(
-            pl.when(pl.col('`Act Orders Rev') < pl.col('lower_bound'))
+            pl.when(pl.col('Act Orders Rev') < pl.col('lower_bound'))
             .then(pl.col('lower_bound'))
-            .when(pl.col('`Act Orders Rev') > pl.col('upper_bound'))
+            .when(pl.col('Act Orders Rev') > pl.col('upper_bound'))
             .then(pl.col('upper_bound'))
-            .otherwise(pl.col('`Act Orders Rev'))
-            .alias('`Act Orders Rev')
+            .otherwise(pl.col('Act Orders Rev'))
+            .alias('Act Orders Rev')
         )
         
         return df.drop(['q1', 'q3', 'iqr', 'lower_bound', 'upper_bound'])

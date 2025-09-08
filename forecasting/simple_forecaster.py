@@ -87,7 +87,7 @@ class SimpleModelPipeline:
     def _prepare_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """Prepare data for training."""
         dft = DataCleaner.prepare_training_data(df)
-        df_fr = dft.rename({'SALES_DATE': 'ds', '`Act Orders Rev': 'y'})
+        df_fr = dft.rename({'SALES_DATE': 'ds', 'Act Orders Rev': 'y'})
         return df_fr[['unique_id', 'ds', 'y']]
     
     def _process_and_integrate_results(self, forecasts: pl.DataFrame, 

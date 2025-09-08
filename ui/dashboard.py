@@ -24,10 +24,14 @@ class dwn_data():
 @ui.page("/")
 def create_dashboard():
     """Create the main dashboard UI using modular components."""
-    from ui.components import FilterComponents, ChartComponents, ActionButtons, DetailsTable
+    from ui.components import FilterComponents, ChartComponents, ActionButtons, DetailsTable, AuthHeader
     
     ui.colors(primary='#555')
     dwn = dwn_data()
+    
+    # Add authentication header
+    auth_header = AuthHeader()
+    auth_header.create_header()
     
     # Initialize filter state
     filter_state = {

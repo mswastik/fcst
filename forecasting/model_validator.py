@@ -102,7 +102,7 @@ class ModelValidator:
         try:
             dft = DataCleaner.prepare_training_data(training_data)
             dft = DataCleaner.prepare_data_for_forecasting(dft)
-            df_fr = dft.rename({'SALES_DATE': 'ds', '`Act Orders Rev': 'y'})
+            df_fr = dft.rename({'SALES_DATE': 'ds', 'Act Orders Rev': 'y'})
             df_fr = df_fr[['unique_id', 'ds', 'y', 'cluster']]
         except Exception as e:
             print(f"  Error preparing training data: {e}")
@@ -336,7 +336,7 @@ class ModelValidator:
             
             # Merge data
             merged = forecasts.select(['unique_id', forecast_col]).join(
-                actuals.select(['unique_id', '`Act Orders Rev']),
+                actuals.select(['unique_id', 'Act Orders Rev']),
                 on='unique_id',
                 how='inner'
             )
@@ -347,7 +347,7 @@ class ModelValidator:
             
             # Extract values
             forecast_values = merged[forecast_col].to_numpy()
-            actual_values = merged['`Act Orders Rev'].to_numpy()
+            actual_values = merged['Act Orders Rev'].to_numpy()
             
             # Remove any null/nan values
             valid_mask = ~(np.isnan(forecast_values) | np.isnan(actual_values))

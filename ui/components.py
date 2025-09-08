@@ -331,6 +331,11 @@ class ActionButtons:
         n.spinner = True
         
         try:
+            # Set loading states for all components
+            state.set_loading_state('charts', True, 'Running...')
+            state.set_loading_state('table', True, 'Running...')
+            state.set_loading_state('data', True, 'Running...')
+            
             # Create a simple wrapper for clustering that uses filtered data
             async def cluster_wrapper():
                 from data_service import create_clusters
@@ -351,10 +356,22 @@ class ActionButtons:
             n.dismiss()
             ui.notify('Clusters created and saved to database!', type='success')
             
+            # Update UI with new data
+            from ui.charts import update_charts
+            from ui.dashboard import details_table, chart_components, details_container
+            await update_charts(chart_components.column_chart_container,
+                               chart_components.line_chart_container, self.dwn_data.df)
+            await details_table.create_table(self.dwn_data.df, details_container)
+            
         except Exception as e:
             n.dismiss()
             ui.notify(f'Clustering failed: {str(e)}', type='negative')
             print(f"Clustering error: {e}")
+        finally:
+            # Clear all loading states
+            state.set_loading_state('charts', False)
+            state.set_loading_state('table', False)
+            state.set_loading_state('data', False)
     
     async def _run_create_models(self):
         """Handle model creation action."""
@@ -373,6 +390,11 @@ class ActionButtons:
         n.spinner = True
         
         try:
+            # Set loading states for all components
+            state.set_loading_state('charts', True, 'Running forecasting models...')
+            state.set_loading_state('table', True, 'Running forecasting models...')
+            state.set_loading_state('data', True, 'Running forecasting models...')
+            
             # Update progress
             n.message = "Processing data and running forecasting models... This may take several minutes."
             
@@ -406,6 +428,13 @@ class ActionButtons:
                 n.spinner = False
                 n.dismiss()
                 ui.notify('Models created and results saved to database!', type='success')
+                
+                # Update UI with new data
+                from ui.charts import update_charts
+                from ui.dashboard import details_table, chart_components, details_container
+                await update_charts(chart_components.column_chart_container,
+                                   chart_components.line_chart_container, result_df)
+                await details_table.create_table(result_df, details_container)
             else:
                 n.dismiss()
                 ui.notify('Forecasting completed but no results returned', type='warning')
@@ -414,11 +443,17 @@ class ActionButtons:
             n.dismiss()
             ui.notify(f'Forecasting failed: {str(e)}', type='negative')
             print(f"Forecasting error: {e}")
+        finally:
+            # Clear all loading states
+            state.set_loading_state('charts', False)
+            state.set_loading_state('table', False)
+            state.set_loading_state('data', False)
     
     def _change_forecast(self):
         """Handle forecast change action."""
         ui.notify(change_fc_action(), type='info')
     
+    # ... (rest of the code remains the same)
     async def _run_validation(self):
         """Handle model validation action."""
         if not hasattr(self.dwn_data, 'df') or self.dwn_data.df is None or len(self.dwn_data.df) == 0:
@@ -566,10 +601,10 @@ class ViewDataDialog:
             
             start_datetime = datetime.strptime(str(start_date), '%Y-%m-%d')
             end_datetime = datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=1)
-            
+
             filtered_df = full_df.filter(
-                (pl.col('SALES_DATE') >= start_datetime) & 
-                (pl.col('SALES_DATE') < end_datetime)
+                (pl.col('SALES_DATE').dt.date() >= start_datetime.date()) &
+                (pl.col('SALES_DATE').dt.date() < end_datetime.date())
             )
             
             if filtered_df.height == 0:
@@ -593,67 +628,93 @@ class DetailsTable:
     def __init__(self, filter_state: Dict[str, Any], update_ui_callback: Callable):
         self.filter_state = filter_state
         self.update_ui_callback = update_ui_callback
+        self.table_container = None
     
     def create_details_container(self):
         """Create the details container with table."""
-        with ui.card().classes('w-full m-0 p-0 h-full'):
+        with ui.card().classes('w-full h-full p-0'):
             details_container = ui.column().classes('w-full h-full')
             with details_container:
                 ui.label('Select Product and Model data').classes('p-2 text-lg font-bold')
+                # Store reference to the table container for loading indicators
+                self.table_container = ui.column().classes('w-full flex-1')
         
         return details_container
     
     async def create_table(self, filtered_df: pl.DataFrame, container):
-        """Create and populate the data table."""
-        if len(filtered_df) == 0:
+        """Create and populate the data table with loading indicator."""
+        if self.table_container is None:
             return
         
-        container.clear()
-        with container:
-            ui.label('Select Product and Model data').classes('p-2 text-lg font-bold')
-            f1 = filtered_df.with_columns(pl.col('SALES_DATE').dt.date())
+        # Show loading state
+        state = get_global_state()
+        state.set_loading_state('table', True, 'Loading table data...')
+        
+        # Clear existing content and show loading
+        self.table_container.clear()
+        with self.table_container:
+            with ui.row().classes('w-full h-full justify-center items-center p-8'):
+                ui.spinner(size='lg')
+                ui.label('Loading table data...').classes('ml-2 text-gray-600')
+        
+        # Force UI update to show loading state
+        await ui.run_javascript('void 0', timeout=0.1)
+        
+        try:
+            if len(filtered_df) == 0:
+                self.table_container.clear()
+                with self.table_container:
+                    ui.label('No data available').classes('text-center text-gray-500 p-8')
+                return
             
-            # Create the appropriate table based on filter state
-            if self.filter_state['level']:
-                table_df = f1.pivot(
-                    'SALES_DATE',
-                    index=[self.filter_state['location1'], self.filter_state['level']],
-                    values='Act Orders Rev',
-                    aggregate_function='sum',
-                    sort_columns=True
-                )
-            elif self.filter_state['location1']:
-                table_df = f1.pivot(
-                    'SALES_DATE',
-                    index=self.filter_state['location1'],
-                    values='Act Orders Rev',
-                    aggregate_function='sum',
-                    sort_columns=True
-                )
-            else:
-                # Use the first available location column as fallback
-                available_location_cols = ['Region', 'Country', 'Area']
-                index_col = None
-                for col in available_location_cols:
-                    if col in f1.columns:
-                        index_col = col
-                        break
+            self.table_container.clear()
+            with self.table_container:
+                f1 = filtered_df.with_columns(pl.col('SALES_DATE').dt.date())
                 
-                if index_col:
+                # Create the appropriate table based on filter state
+                if self.filter_state['level']:
                     table_df = f1.pivot(
                         'SALES_DATE',
-                        index=index_col,
+                        index=[self.filter_state['location1'], self.filter_state['level']],
+                        values='Act Orders Rev',
+                        aggregate_function='sum',
+                        sort_columns=True
+                    )
+                elif self.filter_state['location1']:
+                    table_df = f1.pivot(
+                        'SALES_DATE',
+                        index=self.filter_state['location1'],
                         values='Act Orders Rev',
                         aggregate_function='sum',
                         sort_columns=True
                     )
                 else:
-                    # If no location columns available, create a simple aggregated table
-                    table_df = f1.group_by('SALES_DATE').agg(
-                        pl.col('Act Orders Rev').sum()
-                    ).sort('SALES_DATE')
-            
-            ui.table.from_polars(table_df, pagination=10).classes('w-full').props('virtual-scroll').on('rowClick', self._on_row_click)
+                    # Use the first available location column as fallback
+                    available_location_cols = ['Region', 'Country', 'Area']
+                    index_col = None
+                    for col in available_location_cols:
+                        if col in f1.columns:
+                            index_col = col
+                            break
+                    
+                    if index_col:
+                        table_df = f1.pivot(
+                            'SALES_DATE',
+                            index=index_col,
+                            values='Act Orders Rev',
+                            aggregate_function='sum',
+                            sort_columns=True
+                        )
+                    else:
+                        # If no location columns available, create a simple aggregated table
+                        table_df = f1.group_by('SALES_DATE').agg(
+                            pl.col('Act Orders Rev').sum()
+                        ).sort('SALES_DATE')
+                
+                ui.table.from_polars(table_df, pagination=10).classes('w-full').props('virtual-scroll').on('rowClick', self._on_row_click)
+        finally:
+            # Clear loading state
+            state.set_loading_state('table', False)
     
     async def _on_row_click(self, e):
         """Handle row click events."""

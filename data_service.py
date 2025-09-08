@@ -149,8 +149,9 @@ def create_enhanced_clusters(df: pl.DataFrame, file_path: str, state: DataState 
         
     if 'unique_id' not in df.columns:
         df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
-    # Filter to training data
-    df1 = df.filter(pl.col('SALES_DATE') <= datetime.today() - relativedelta(months=1))
+    # Filter to training data with timezone-safe comparison
+    cutoff_date = datetime.today() - relativedelta(months=1)
+    df1 = df.filter(pl.col('SALES_DATE').dt.date() <= cutoff_date.date())
     # Extract time series features
     features_df = extract_ts_features(df1)
     
@@ -318,9 +319,9 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
             try:
                 last_full_month = datetime.today() - relativedelta(months=1)
                 print(f"Filtering data before {last_full_month}")
-                
+
                 # Ensure we have the right data types before filtering
-                df1 = df.filter(pl.col('SALES_DATE') <= last_full_month)
+                df1 = df.filter(pl.col('SALES_DATE').dt.date() <= last_full_month.date())
                 df1 = df1[['unique_id', 'SALES_DATE', 'Act Orders Rev']]
                 df1 = df1.with_columns(pl.col('Act Orders Rev').cast(pl.Float32).alias('Act Orders Rev'))
                 df1 = df1.with_columns(ynorm=((pl.col('Act Orders Rev')-pl.col('Act Orders Rev').mean()) / pl.col('Act Orders Rev').std()).over('unique_id'))
@@ -475,9 +476,9 @@ def filter_last_36_months(df: pl.DataFrame) -> pl.DataFrame:
     if DataCleaner is not None:
         return DataCleaner.filter_last_n_months(df, 36)
     else:
-        # Simple fallback filter
+        # Simple fallback filter with timezone-safe comparison
         cutoff_date = datetime.today() - relativedelta(months=36)
-        return df.filter(pl.col('SALES_DATE') >= cutoff_date)
+        return df.filter(pl.col('SALES_DATE').dt.date() >= cutoff_date.date())
 
 def prepare_data1(df: pl.DataFrame) -> pl.DataFrame:
     """Prepare data for training"""
@@ -492,7 +493,7 @@ def prepare_data1(df: pl.DataFrame) -> pl.DataFrame:
                     pl.col('SALES_DATE').cast(pl.Datetime).alias('SALES_DATE')
                 )
             
-            return df.fill_null(0).filter(pl.col('SALES_DATE') <= last_full_month)
+            return df.fill_null(0).filter(pl.col('SALES_DATE').dt.date() <= last_full_month.date())
         except Exception as date_error:
             print(f"Error in prepare_data1 date filtering: {date_error}")
             # If date filtering fails, just return the data without filtering
@@ -614,7 +615,7 @@ def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -
         df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
     df = df.drop('cluster', strict=False)
     df = df.drop('cluster_right', strict=False)
-    df1 = df.filter(pl.col('SALES_DATE') <= datetime.today() - relativedelta(months=1))
+    df1 = df.filter(pl.col('SALES_DATE').dt.date() <= (datetime.today() - relativedelta(months=1)).date())
     df1 = df1[['unique_id', 'SALES_DATE', 'Act Orders Rev']]
     df1 = df1.with_columns(pl.col('Act Orders Rev').cast(pl.Float32).alias('Act Orders Rev'))
     df1 = df1.with_columns(ynorm=((pl.col('Act Orders Rev')-pl.col('Act Orders Rev').mean()) / pl.col('Act Orders Rev').std()).over('unique_id'))

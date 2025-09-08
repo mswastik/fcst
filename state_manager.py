@@ -25,6 +25,12 @@ class DataState:
     # UI state
     by_month: bool = False
     
+    # UI state - Loading indicators for different components
+    loading_charts: bool = False
+    loading_table: bool = False
+    loading_data: bool = False
+    loading_message: str = ""
+    
     # Constants
     products: List[str] = field(default_factory=lambda: [
         "Franchise", "IBP Level 5", "IBP Level 6", "CatalogNumber"
@@ -46,6 +52,27 @@ class DataState:
         # This will be loaded lazily when needed
         self.products_filt = pl.DataFrame()
         self.locations_filt = pl.DataFrame()
+    
+    def set_loading_state(self, component: str, loading: bool, message: str = "") -> None:
+        """Set loading state for a specific component."""
+        if component == 'charts':
+            self.loading_charts = loading
+        elif component == 'table':
+            self.loading_table = loading
+        elif component == 'data':
+            self.loading_data = loading
+        self.loading_message = message
+    
+    def is_loading(self, component: str = None) -> bool:
+        """Check if a component or any component is loading."""
+        if component == 'charts':
+            return self.loading_charts
+        elif component == 'table':
+            return self.loading_table
+        elif component == 'data':
+            return self.loading_data
+        else:
+            return self.loading_charts or self.loading_table or self.loading_data
     
     def initialize_data(self) -> None:
         """Initialize the application data."""

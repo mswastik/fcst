@@ -45,13 +45,26 @@ def create_dashboard():
     async def update_ui(filtered_df):
         """Update all UI components after filter changes"""
         try:
+            # Set loading states for both charts and table
+            state = get_global_state()
+            state.set_loading_state('charts', True, 'Updating charts...')
+            state.set_loading_state('table', True, 'Updating table...')
+            
+            # Force UI update to show loading indicators
+            await ui.run_javascript('void 0', timeout=0.1)
+            
             # Update charts
             await update_charts(chart_components.column_chart_container,
                                chart_components.line_chart_container, filtered_df)
 
             # Update details table
             await details_table.create_table(filtered_df, details_container)
+            
         except Exception as e:
+            # Clear loading states on error
+            state = get_global_state()
+            state.set_loading_state('charts', False)
+            state.set_loading_state('table', False)
             ui.notify(f"Error updating UI: {str(e)}", type='negative')
             print(f"UI update error: {e}")
     
@@ -85,16 +98,24 @@ def create_dashboard():
         )
 
         if load_data_condition:
-
-            # Check data size before loading to prevent memory issues
-            if await check_data_size_before_loading(filter_state):
-                # Apply filters by querying database directly
-                filtered_result = apply_filters(filter_state)
-                await update_ui(filtered_result['filtered_df'])
-                app.storage.user['dwn_df_json'] = filtered_result['fdf']
-            else:
-                # Data too large, don't load
-                return
+            try:
+                # Set loading state for data fetching
+                state = get_global_state()
+                state.set_loading_state('data', True, 'Loading data from database...')
+                
+                # Check data size before loading to prevent memory issues
+                if await check_data_size_before_loading(filter_state):
+                    # Apply filters by querying database directly
+                    filtered_result = apply_filters(filter_state)
+                    await update_ui(filtered_result['filtered_df'])
+                    app.storage.user['dwn_df_json'] = filtered_result['fdf']
+                else:
+                    # Data too large, don't load
+                    state.set_loading_state('data', False)
+                    return
+            finally:
+                # Clear data loading state
+                state.set_loading_state('data', False)
     
     async def check_data_size_before_loading(filter_state):
         """Check estimated data size before loading and warn user if too large"""
@@ -149,6 +170,9 @@ def create_dashboard():
             db_service = get_database_service()
             state = get_global_state()
 
+            # Set loading state for data
+            state.set_loading_state('data', True, 'Fetching data from database...')
+            
             # Load data with filters applied at database level
             dwn.df = db_service.get_filtered_sales_actuals(
                 location_col=filter_state.get('location1'),
@@ -196,6 +220,9 @@ def create_dashboard():
             ui.notify(f"Error loading filtered data: {str(e)}", type='negative')
             print(f"Data loading error: {e}")
             raise
+        finally:
+            # Clear loading state
+            state.set_loading_state('data', False)
     with ui.card().classes('w-full h-full p-2'):
         # Create filter components
         filter_components = FilterComponents(filter_state, on_filter_change)

@@ -1,8 +1,10 @@
 """
-DuckDB Service Layer for Forecasting Application
-Provides database operations and replaces parquet file operations
+Databricks Service Layer for Forecasting Application
+Provides database operations using Databricks SQL Connector
 """
-import duckdb
+import os
+from databricks import sql
+from databricks.sdk.core import Config
 import polars as pl
 import pandas as pd
 from typing import Optional, List, Dict, Any, Tuple
@@ -15,19 +17,24 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 class DatabaseService:
-    """Main database service for DuckDB operations"""
-    
+    """Main database service for Databricks SQL operations"""
+
     _instance = None
     _initialized = False
-    
-    def __new__(cls, db_path: str = "forecasting.duckdb"):
+
+    def __new__(cls, http_path: str = None, host: str = None, client_id: str = None, client_secret: str = None):
         if cls._instance is None:
             cls._instance = super(DatabaseService, cls).__new__(cls)
         return cls._instance
-    
-    def __init__(self, db_path: str = "forecasting.duckdb"):
+
+    def __init__(self, http_path: str = None, host: str = None, client_id: str = None, client_secret: str = None):
         if not self._initialized:
-            self.db_path = db_path
+            # Use environment variables directly (same as working dashboard.py pattern)
+            self.http_path = http_path or os.getenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/62d47c983bb6df91")
+            self.host = host or os.getenv("DATABRICKS_HOST")
+            self.client_id = client_id or os.getenv("DATABRICKS_CLIENT_ID")
+            self.client_secret = client_secret or os.getenv("DATABRICKS_CLIENT_SECRET")
+
             self.conn = None
             self._connection_initialized = False
             DatabaseService._initialized = True
@@ -36,154 +43,90 @@ class DatabaseService:
         """Ensure database connection is initialized (lazy initialization)"""
         if not self._connection_initialized:
             try:
-                self.conn = duckdb.connect(self.db_path)
-                
-                # Check if tables exist, if not create them
-                if not self._tables_exist():
-                    self._create_schema()
-                    logger.info("Database schema created successfully")
-                else:
-                    logger.info("Database schema already exists")
-                
+                # Use the same authentication pattern as working dashboard.py
+                config = Config(
+                    host=self.host,
+                    client_id=self.client_id,
+                    client_secret=self.client_secret
+                )
+
+                # Connect using the same pattern as dashboard.py
+                self.conn = sql.connect(
+                    server_hostname=config.host,
+                    http_path=self.http_path,
+                    credentials_provider=lambda: config.authenticate
+                )
+
+                logger.info("Databricks connection established successfully")
                 self._connection_initialized = True
+
             except Exception as e:
-                logger.error(f"Failed to initialize database: {e}")
+                logger.error(f"Failed to initialize Databricks connection: {e}")
+                logger.error(f"Connection details - Host: {self.host}, HTTP Path: {self.http_path}")
+                logger.error(f"Make sure environment variables are set: DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET")
                 raise
     
     def _tables_exist(self) -> bool:
         """Check if main tables exist"""
         try:
-            result = self.conn.execute("""
-                SELECT COUNT(*) as table_count 
-                FROM information_schema.tables 
-                WHERE table_name IN ('product_hierarchy', 'location_hierarchy', 'sales_actuals')
-            """).fetchone()
-            return result[0] == 3
+            # For Databricks, we'll assume tables exist since they're already created
+            # You can implement this check if needed using SHOW TABLES or similar
+            return True
         except:
             return False
-    
+
     def _create_schema(self):
-        """Create database schema from SQL file"""
-        schema_path = Path(__file__).parent / "database_schema.sql"
-        if schema_path.exists():
-            with open(schema_path, 'r') as f:
-                schema_sql = f.read()
-            self.conn.execute(schema_sql)
-        else:
-            # Fallback: create basic schema
-            self._create_basic_schema()
-    
+        """Create database schema from SQL file (not needed for Databricks as tables already exist)"""
+        logger.info("Using existing Databricks tables - no schema creation needed")
+
     def _create_basic_schema(self):
-        """Create basic schema if SQL file not found"""
-        schema_sql = """
-        CREATE TABLE IF NOT EXISTS product_hierarchy (
-            demantra_item_skey BIGINT PRIMARY KEY,
-            business_sector VARCHAR,
-            business_unit VARCHAR,
-            franchise VARCHAR,
-            product_line VARCHAR,
-            ibp_level_5 VARCHAR,
-            ibp_level_6 VARCHAR,
-            ibp_level_7 VARCHAR,
-            catalog_number VARCHAR NOT NULL,
-            uom VARCHAR,
-            pack_content VARCHAR,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        
-        CREATE TABLE IF NOT EXISTS location_hierarchy (
-            location_skey BIGINT PRIMARY KEY,
-            selling_division VARCHAR,
-            area VARCHAR,
-            stryker_group_region VARCHAR,
-            region VARCHAR,
-            country VARCHAR NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        
-        CREATE TABLE IF NOT EXISTS sales_actuals (
-            id BIGINT PRIMARY KEY,
-            item_skey BIGINT NOT NULL,
-            location_skey BIGINT NOT NULL,
-            sales_date DATE NOT NULL,
-            asp_final_rev DECIMAL(38,8),
-            act_orders_rev DECIMAL(38,8),
-            act_orders_rev_val DECIMAL(38,8),
-            fcst_df_final_rev DECIMAL(38,8),
-            l0_df_final_rev DECIMAL(38,8),
-            l1_df_final_rev DECIMAL(38,8),
-            l2_df_final_rev DECIMAL(38,8),
-            fcst_df_final_rev_val DECIMAL(38,8),
-            fcst_stat_prelim_rev DECIMAL(38,8),
-            fcst_stat_final_rev DECIMAL(38,8),
-            l0_stat_final_rev DECIMAL(38,8),
-            l1_stat_final_rev DECIMAL(38,8),
-            l2_stat_final_rev DECIMAL(38,8),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        
-        CREATE TABLE IF NOT EXISTS product_clusters (
-            cluster_id VARCHAR PRIMARY KEY,
-            item_skey BIGINT NOT NULL,
-            location_skey BIGINT NOT NULL,
-            cluster_number INTEGER NOT NULL,
-            cluster_features JSON,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(item_skey, location_skey)
-        );
-        
-        CREATE TABLE IF NOT EXISTS forecasts (
-            forecast_id BIGINT PRIMARY KEY,
-            item_skey BIGINT NOT NULL,
-            location_skey BIGINT NOT NULL,
-            forecast_date DATE NOT NULL,
-            forecast_horizon INTEGER NOT NULL,
-            model_type VARCHAR NOT NULL,
-            forecast_value DECIMAL(15,2) NOT NULL,
-            confidence_lower DECIMAL(15,2),
-            confidence_upper DECIMAL(15,2),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        self.conn.execute(schema_sql)
+        """Create basic schema if SQL file not found (not needed for Databricks)"""
+        logger.info("Using existing Databricks tables - no schema creation needed")
     
     @contextmanager
     def transaction(self):
-        """Context manager for database transactions"""
+        """Context manager for database transactions (Databricks handles transactions automatically)"""
+        # Databricks SQL connector handles transactions differently
+        # We'll just yield the connection and let Databricks handle commits
+        self._ensure_connection()
         try:
-            self.conn.execute("BEGIN TRANSACTION")
             yield self.conn
-            self.conn.execute("COMMIT")
         except Exception as e:
-            self.conn.execute("ROLLBACK")
-            logger.error(f"Transaction rolled back: {e}")
+            logger.error(f"Transaction error: {e}")
             raise
-    
+
     def close(self):
         """Close database connection"""
         if self.conn:
             self.conn.close()
+            self.conn = None
+            self._connection_initialized = False
     
     # Product Hierarchy Operations
     def upsert_product_hierarchy(self, df: pl.DataFrame) -> int:
-        """Insert or update product hierarchy data"""
+        """Insert or update product hierarchy data (for Databricks, we'll use INSERT OR REPLACE)"""
         self._ensure_connection()
         try:
-            # Convert to pandas for DuckDB compatibility
+            # Convert to pandas for Databricks compatibility
             pdf = df.to_pandas()
-            
+
             with self.transaction():
-                # Clear existing data
-                self.conn.execute("DELETE FROM product_hierarchy")
-                
-                # Insert new data
-                self.conn.execute("""
-                    INSERT INTO product_hierarchy 
+                with self.conn.cursor() as cursor:
+                    # Clear existing data
+                    cursor.execute("DELETE FROM da.product_hierarchy")
+
+                    # Insert new data using parameterized query
+                    insert_query = """
+                    INSERT INTO da.product_hierarchy
                     (demantra_item_skey, business_sector, business_unit, franchise, product_line,
                      ibp_level_5, ibp_level_6, ibp_level_7, catalog_number, uom, pack_content)
-                    SELECT * FROM pdf
-                """)
-                
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+
+                    # Convert DataFrame to list of tuples for batch insert
+                    data_tuples = [tuple(row) for row in pdf.values]
+                    cursor.executemany(insert_query, data_tuples)
+
                 return len(pdf)
         except Exception as e:
             logger.error(f"Failed to upsert product hierarchy: {e}")
@@ -192,21 +135,23 @@ class DatabaseService:
     def get_product_hierarchy(self, filters: Dict[str, Any] = None) -> pl.DataFrame:
         """Get product hierarchy with optional filters"""
         self._ensure_connection()
-        query = "SELECT * FROM product_hierarchy"
+        query = "SELECT * FROM da.product_hierarchy"
         params = []
-        
+
         if filters:
             conditions = []
             for key, value in filters.items():
                 if value is not None:
                     conditions.append(f"{key} = ?")
                     params.append(value)
-            
+
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-        
-        result = self.conn.execute(query, params).pl()
-        return result
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query, params)
+            df = pl.from_arrow(cursor.fetchall_arrow())
+        return df
     
     # Location Hierarchy Operations
     def upsert_location_hierarchy(self, df: pl.DataFrame) -> int:
@@ -214,38 +159,45 @@ class DatabaseService:
         self._ensure_connection()
         try:
             pdf = df.to_pandas()
-            
+
             with self.transaction():
-                self.conn.execute("DELETE FROM location_hierarchy")
-                self.conn.execute("""
-                    INSERT INTO location_hierarchy 
+                with self.conn.cursor() as cursor:
+                    cursor.execute("DELETE FROM da.location_hierarchy")
+
+                    insert_query = """
+                    INSERT INTO da.location_hierarchy
                     (location_skey, selling_division, area, stryker_group_region, region, country)
-                    SELECT * FROM pdf
-                """)
-                
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """
+
+                    data_tuples = [tuple(row) for row in pdf.values]
+                    cursor.executemany(insert_query, data_tuples)
+
                 return len(pdf)
         except Exception as e:
             logger.error(f"Failed to upsert location hierarchy: {e}")
             raise
-    
+
     def get_location_hierarchy(self, filters: Dict[str, Any] = None) -> pl.DataFrame:
         """Get location hierarchy with optional filters"""
         self._ensure_connection()
-        query = "SELECT * FROM location_hierarchy"
+        query = "SELECT * FROM da.location_hierarchy"
         params = []
-        
+
         if filters:
             conditions = []
             for key, value in filters.items():
                 if value is not None:
                     conditions.append(f"{key} = ?")
                     params.append(value)
-            
+
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-        
-        result = self.conn.execute(query, params).pl()
-        return result
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query, params)
+            df = pl.from_arrow(cursor.fetchall_arrow())
+        return df
     
     # Sales Actuals Operations
     def upsert_sales_actuals(self, df: pl.DataFrame) -> int:
@@ -254,37 +206,51 @@ class DatabaseService:
         try:
             # Prepare data with proper IDs
             df_prepared = self._prepare_sales_data(df)
-            
+
             # Filter out rows with missing foreign keys to avoid constraint violations
             df_prepared = df_prepared.filter(
-                (pl.col("item_skey").is_not_null()) & 
+                (pl.col("item_skey").is_not_null()) &
                 (pl.col("location_skey").is_not_null())
             )
-            
+
             if len(df_prepared) == 0:
                 logger.warning("No valid sales data to insert after filtering missing keys")
                 return 0
-            
-            #pdf = df_prepared.to_pandas()
-            
+
+            # Convert to pandas for Databricks
+            pdf = df_prepared.to_pandas()
+
             with self.transaction():
-                # Use UPSERT logic based on item_skey, location_skey, sales_date
-                self.conn.execute("""
-                    DELETE FROM sales_actuals 
+                with self.conn.cursor() as cursor:
+                    # Use UPSERT logic based on item_skey, location_skey, sales_date
+                    delete_query = """
+                    DELETE FROM da.sales_actuals
                     WHERE (item_skey, location_skey, sales_date) IN (
-                        SELECT item_skey, location_skey, sales_date FROM df_prepared
+                        SELECT ?, ?, ?
+                        FROM VALUES (?, ?, ?)
                     )
-                """)
-                
-                self.conn.execute("""
-                    INSERT INTO sales_actuals 
+                    """
+
+                    # First delete existing records
+                    for _, row in pdf.iterrows():
+                        cursor.execute(delete_query, (
+                            row['item_skey'], row['location_skey'], row['sales_date'],
+                            row['item_skey'], row['location_skey'], row['sales_date']
+                        ))
+
+                    # Insert new records
+                    insert_query = """
+                    INSERT INTO da.sales_actuals
                     (id, item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
                      fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, fcst_df_final_rev_val,
                      fcst_stat_prelim_rev, fcst_stat_final_rev, l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev)
-                    SELECT * FROM df_prepared
-                """)
-                
-                return len(df_prepared)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+
+                    data_tuples = [tuple(row) for row in pdf.values]
+                    cursor.executemany(insert_query, data_tuples)
+
+                return len(pdf)
         except Exception as e:
             logger.error(f"Failed to upsert sales actuals: {e}")
             raise
@@ -333,89 +299,98 @@ class DatabaseService:
         """Get total number of cluster records in database"""
         self._ensure_connection()
         try:
-            result = self.conn.execute("""
-                SELECT COUNT(*) as count 
-                FROM product_clusters
-            """).fetchone()
-            return result[0] if result else 0
+            with self.conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM product_clusters
+                """)
+                result = cursor.fetchone()
+                return result[0] if result else 0
         except Exception as e:
             logger.warning(f"Could not get cluster count: {e}")
             return 0
-    
+
     def get_forecast_count(self) -> int:
         """Get total number of forecast records in database"""
         self._ensure_connection()
         try:
-            result = self.conn.execute("""
-                SELECT COUNT(*) as count 
-                FROM forecasts
-            """).fetchone()
-            return result[0] if result else 0
+            with self.conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM forecasts
+                """)
+                result = cursor.fetchone()
+                return result[0] if result else 0
         except Exception as e:
             logger.warning(f"Could not get forecast count: {e}")
             return 0
     
-    def get_sales_actuals(self, 
+    def get_sales_actuals(self,
                          item_skeys: List[int] = None,
                          location_skeys: List[int] = None,
                          date_range: Tuple[datetime, datetime] = None,
                          limit: int = None) -> pl.DataFrame:
         """Get sales actuals with flexible filtering"""
         self._ensure_connection()
-        
+
         query = """
         SELECT sa.*, ph.catalog_number, ph.franchise, ph.ibp_level_5, ph.ibp_level_6,
                ph.business_sector, ph.business_unit, ph.product_line, ph.ibp_level_7,
                lh.country, lh.region, lh.area, lh.stryker_group_region, lh.selling_division
-        FROM sales_actuals sa
-        LEFT JOIN product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
-        LEFT JOIN location_hierarchy lh ON sa.location_skey = lh.location_skey
+        FROM da.sales_actuals sa
+        LEFT JOIN da.product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
+        LEFT JOIN da.location_hierarchy lh ON sa.location_skey = lh.location_skey
         """
-        
+
         conditions = []
         params = []
-        
+
         if item_skeys:
             placeholders = ','.join(['?' for _ in item_skeys])
             conditions.append(f"sa.item_skey IN ({placeholders})")
             params.extend(item_skeys)
-        
+
         if location_skeys:
             placeholders = ','.join(['?' for _ in location_skeys])
             conditions.append(f"sa.location_skey IN ({placeholders})")
             params.extend(location_skeys)
-        
+
         if date_range:
             conditions.append("sa.sales_date BETWEEN ? AND ?")
             params.extend(date_range)
-        
+
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        
+
         query += " ORDER BY sa.sales_date, sa.item_skey, sa.location_skey"
-        
+
         if limit:
             query += f" LIMIT {limit}"
-        
-        result = self.conn.execute(query, params).pl() #.fetchdf()
-        result = result.rename({
-                    'act_orders_rev': 'Act Orders Rev',
-                    'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
-                    'fcst_stat_final_rev': 'Fcst Stat Final Rev',
-                    'l2_stat_final_rev': 'L2 Stat Final Rev',
-                    'fcst_df_final_rev': 'Fcst DF Final Rev',
-                    'l2_df_final_rev': 'L2 DF Final Rev',
-                    'sales_date': 'SALES_DATE',
-                    'catalog_number': 'CatalogNumber',
-                    'region': 'Region',
-                    'country': 'Country',
-                    'area': 'Area',
-                    'business_unit': 'Business Unit',
-                    'franchise': 'Franchise',
-                    'ibp_level_5': 'IBP Level 5',
-                    'ibp_level_6': 'IBP Level 6'
-                },strict=False)
-        return result
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query, params)
+            df = pl.from_arrow(cursor.fetchall_arrow())
+
+        # Rename columns to match expected format
+        df = df.rename({
+            'act_orders_rev': 'Act Orders Rev',
+            'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
+            'fcst_stat_final_rev': 'Fcst Stat Final Rev',
+            'l2_stat_final_rev': 'L2 Stat Final Rev',
+            'fcst_df_final_rev': 'Fcst DF Final Rev',
+            'l2_df_final_rev': 'L2 DF Final Rev',
+            'sales_date': 'SALES_DATE',
+            'catalog_number': 'CatalogNumber',
+            'region': 'Region',
+            'country': 'Country',
+            'area': 'Area',
+            'business_unit': 'Business Unit',
+            'franchise': 'Franchise',
+            'ibp_level_5': 'IBP Level 5',
+            'ibp_level_6': 'IBP Level 6'
+        }, strict=False)
+
+        return df
     
     # Cluster Operations
     def upsert_clusters(self, df: pl.DataFrame) -> int:
@@ -425,29 +400,38 @@ class DatabaseService:
             # Prepare cluster data
             cluster_data = self._prepare_cluster_data(df)
             pdf = cluster_data.to_pandas()
-            
+
             with self.transaction():
-                # Delete existing clusters for these product-location combinations
-                self.conn.execute("""
-                    DELETE FROM product_clusters 
-                    WHERE (item_skey, location_skey) IN (
-                        SELECT item_skey, location_skey FROM pdf
-                    )
-                """)
-                
-                # Insert new clusters
-                self.conn.execute("""
-                    INSERT INTO product_clusters 
-                    (cluster_id, item_skey, location_skey, cluster_number, cluster_features)
-                    SELECT * FROM pdf
-                """)
-                
+                with self.conn.cursor() as cursor:
+                    # Delete existing clusters for these product-location combinations
+                    delete_query = """
+                        DELETE FROM da.product_clusters
+                        WHERE (item_skey, location_skey) IN (
+                            SELECT ?, ?
+                            FROM VALUES (?, ?)
+                        )
+                    """
+
+                    for _, row in pdf.iterrows():
+                        cursor.execute(delete_query, (
+                            row['item_skey'], row['location_skey'],
+                            row['item_skey'], row['location_skey']
+                        ))
+
+                    # Insert new clusters
+                    insert_query = """
+                        INSERT INTO da.product_clusters
+                        (cluster_id, item_skey, location_skey, cluster_number, cluster_features)
+                        VALUES (?, ?, ?, ?, ?)
+                    """
+
+                    data_tuples = [tuple(row) for row in pdf.values]
+                    cursor.executemany(insert_query, data_tuples)
+
                 return len(pdf)
         except Exception as e:
             logger.error(f"Failed to upsert clusters: {e}")
             raise
-    
-    def _prepare_cluster_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """Prepare cluster data for database insertion"""
         # Ensure we have item_skey and location_skey
         if 'item_skey' not in df.columns:
@@ -491,13 +475,15 @@ class DatabaseService:
         self._ensure_connection()
         query = """
         SELECT pc.*, ph.catalog_number, ph.franchise, lh.country, lh.region
-        FROM product_clusters pc
-        LEFT JOIN product_hierarchy ph ON pc.item_skey = ph.demantra_item_skey
-        LEFT JOIN location_hierarchy lh ON pc.location_skey = lh.location_skey
+        FROM da.product_clusters pc
+        LEFT JOIN da.product_hierarchy ph ON pc.item_skey = ph.demantra_item_skey
+        LEFT JOIN da.location_hierarchy lh ON pc.location_skey = lh.location_skey
         """
-        
-        result = self.conn.execute(query).pl() #.fetchdf()
-        return result
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            df = pl.from_arrow(cursor.fetchall_arrow())
+        return df
     
     # Forecast Operations
     def insert_forecasts(self, df: pl.DataFrame, model_type: str = "NHITS") -> int:
@@ -506,15 +492,19 @@ class DatabaseService:
         try:
             forecast_data = self._prepare_forecast_data(df, model_type)
             pdf = forecast_data.to_pandas()
-            
+
             with self.transaction():
-                self.conn.execute("""
-                    INSERT INTO forecasts 
-                    (forecast_id, item_skey, location_skey, forecast_date, 
+                with self.conn.cursor() as cursor:
+                    insert_query = """
+                    INSERT INTO da.forecasts
+                    (forecast_id, item_skey, location_skey, forecast_date,
                      forecast_horizon, model_type, forecast_value)
-                    SELECT * FROM pdf
-                """)
-                
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """
+
+                    data_tuples = [tuple(row) for row in pdf.values]
+                    cursor.executemany(insert_query, data_tuples)
+
                 return len(pdf)
         except Exception as e:
             logger.error(f"Failed to insert forecasts: {e}")
@@ -611,31 +601,35 @@ class DatabaseService:
             # Get unique products
             products_query = """
             SELECT DISTINCT catalog_number, franchise, ibp_level_5, ibp_level_6
-            FROM product_hierarchy 
+            FROM da.product_hierarchy
             WHERE catalog_number IS NOT NULL
             ORDER BY catalog_number
             """
-            products_df = self.conn.execute(products_query).pl()  #.fetchdf())
-            
+            with self.conn.cursor() as cursor:
+                cursor.execute(products_query)
+                products_df = pl.from_arrow(cursor.fetchall_arrow())
+
             # Get unique locations
             locations_query = """
             SELECT DISTINCT country, region, area
-            FROM location_hierarchy 
+            FROM da.location_hierarchy
             WHERE country IS NOT NULL
             ORDER BY country
             """
-            locations_df = self.conn.execute(locations_query).pl() #.fetchdf())
-            
+            with self.conn.cursor() as cursor:
+                cursor.execute(locations_query)
+                locations_df = pl.from_arrow(cursor.fetchall_arrow())
+
             # Extract unique values, filtering out nulls
             catalog_numbers = [x for x in products_df['catalog_number'].unique().to_list() if x is not None]
             franchises = [x for x in products_df['franchise'].unique().to_list() if x is not None]
             ibp_level_5s = [x for x in products_df['ibp_level_5'].unique().to_list() if x is not None]
             ibp_level_6s = [x for x in products_df['ibp_level_6'].unique().to_list() if x is not None]
-            
+
             countries = [x for x in locations_df['country'].unique().to_list() if x is not None]
             regions = [x for x in locations_df['region'].unique().to_list() if x is not None]
             areas = [x for x in locations_df['area'].unique().to_list() if x is not None]
-            
+
             return {
                 'products': products_df.to_dicts(),
                 'locations': locations_df.to_dicts(),
@@ -686,16 +680,18 @@ class DatabaseService:
             # Count query with filters
             count_query = f"""
             SELECT COUNT(*) as count
-            FROM sales_actuals sa
-            JOIN product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
-            JOIN location_hierarchy lh ON sa.location_skey = lh.location_skey
+            FROM da.sales_actuals sa
+            JOIN da.product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
+            JOIN da.location_hierarchy lh ON sa.location_skey = lh.location_skey
             {"WHERE " + where_clause if where_clause else ""}
             """
 
-            if where_clause:
-                result = self.conn.execute(count_query, params).fetchone()
-            else:
-                result = self.conn.execute(count_query).fetchone()
+            with self.conn.cursor() as cursor:
+                if where_clause:
+                    cursor.execute(count_query, params)
+                else:
+                    cursor.execute(count_query)
+                result = cursor.fetchone()
 
             return result[0] if result else 0
 
@@ -747,13 +743,8 @@ class DatabaseService:
                 sa.fcst_df_final_rev,
                 sa.l2_df_final_rev,
                 sa.act_orders_rev_val,
-                sa.l2_df_final_rev,
                 sa.l1_df_final_rev,
                 sa.l0_df_final_rev,
-                sa.l2_stat_final_rev,
-                sa.fcst_df_final_rev,
-                sa.fcst_stat_final_rev,
-                sa.fcst_stat_prelim_rev,
                 sa.fcst_df_final_rev_val,
 
                 -- Location fields
@@ -774,17 +765,19 @@ class DatabaseService:
                 ph.ibp_level_7,
                 ph.uom,
                 ph.pack_content
-            FROM sales_actuals sa
-            JOIN product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
-            JOIN location_hierarchy lh ON sa.location_skey = lh.location_skey
+            FROM da.sales_actuals sa
+            JOIN da.product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
+            JOIN da.location_hierarchy lh ON sa.location_skey = lh.location_skey
             {"WHERE " + where_clause if where_clause else ""}
             ORDER BY sa.sales_date
             """
 
-            if where_clause:
-                df = self.conn.execute(query, params).pl()
-            else:
-                df = self.conn.execute(query).pl()
+            with self.conn.cursor() as cursor:
+                if where_clause:
+                    cursor.execute(query, params)
+                else:
+                    cursor.execute(query)
+                df = pl.from_arrow(cursor.fetchall_arrow())
 
             return df
 

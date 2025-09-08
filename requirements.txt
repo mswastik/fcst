@@ -13,3 +13,4 @@ databricks-sdk
 databricks-connect==16.1.6
 databricks-sql-connector
 authlib>=1.0.0
+requests

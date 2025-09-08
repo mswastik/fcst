@@ -68,10 +68,10 @@ class ModelValidator:
             training_cutoff = validation_month - relativedelta(months=3)
             
             # Get training data (up to 3 months before validation month)
-            training_data = df.filter(pl.col('SALES_DATE') <= training_cutoff)
+            training_data = df.filter(pl.col('SALES_DATE').dt.date() <= training_cutoff.date())
             
             # Get actual values for the validation month
-            actual_data = df.filter(pl.col('SALES_DATE') == validation_month)
+            actual_data = df.filter(pl.col('SALES_DATE').dt.date() == validation_month.date())
             
             if training_data.height == 0 or actual_data.height == 0:
                 print(f"Insufficient data for validation month {validation_month.strftime('%Y-%m')}")
@@ -286,7 +286,7 @@ class ModelValidator:
             
             # Filter forecasts for the validation month
             validation_forecasts = forecasts.filter(
-                pl.col(date_col) == validation_month
+                pl.col(date_col).dt.date() == validation_month.date()
             )
             
             return validation_forecasts

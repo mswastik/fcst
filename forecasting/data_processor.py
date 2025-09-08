@@ -43,8 +43,8 @@ class DataCleaner:
         start_date = last_full_month - relativedelta(months=months-1)
         
         return df.filter(
-            (pl.col('SALES_DATE') >= start_date) & 
-            (pl.col('SALES_DATE') <= last_full_month)
+            (pl.col('SALES_DATE').dt.date() >= start_date.date()) &
+            (pl.col('SALES_DATE').dt.date() <= last_full_month.date())
         )
     
     @staticmethod

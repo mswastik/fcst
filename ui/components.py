@@ -32,7 +32,7 @@ class FilterComponents:
             self._create_product_selects()
             self._create_level_select()
             #self._create_data_files_select()
-            self._create_get_data_button()
+            #self._create_get_data_button()
     """
     def _create_data_files_select(self):
         '''Create data files selection dropdown - now loads from DuckDB.'''
@@ -114,7 +114,7 @@ class FilterComponents:
             clearable=True,
             on_change=lambda e: self.on_filter_change('level', e.value)
         ).classes('w-40')
-    
+    '''
     def _create_get_data_button(self):
         """Create the Get Data button."""
         return ui.button('Get Data', on_click=self._show_download_dialog).classes('ml-auto')
@@ -122,7 +122,7 @@ class FilterComponents:
     def _show_download_dialog(self):
         """Show the data download dialog."""
         DownloadDialog().show()
-    
+    '''
     def update_location_options(self, options: list):
         """Update location select options."""
         if hasattr(self, 'location_select2'):
@@ -135,7 +135,7 @@ class FilterComponents:
             self.product_select2.options = options
             self.product_select2.update()
 
-
+'''
 class DownloadDialog:
     """Handles the data download dialog functionality."""
     
@@ -209,7 +209,7 @@ class DownloadDialog:
         """Update the timer display."""
         # Timer update logic would go here
         pass
-
+    '''
 
 class ChartComponents:
     """Handles chart-related UI components."""

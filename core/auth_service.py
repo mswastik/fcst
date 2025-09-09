@@ -2,7 +2,7 @@
 Authentication service for Microsoft OAuth2 SSO
 """
 import os
-from typing import Optional
+#from typing import Optional
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware

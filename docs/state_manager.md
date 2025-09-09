@@ -19,10 +19,15 @@ class DataState:
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `df` | `Optional[pl.DataFrame]` | Main dataframe containing all loaded data |
+| `full_df` | `Optional[pl.DataFrame]` | Store original full dataset (backup of complete data) |
 | `filtered_df` | `Optional[pl.DataFrame]` | Filtered subset of main dataframe |
 | `filtered_products` | `List[str]` | List of currently filtered products |
 | `filtered_models` | `List[str]` | List of available models for filtered data |
 | `by_month` | `bool` | Toggle for monthly aggregation in charts |
+| `loading_charts` | `bool` | Loading state indicator for chart components |
+| `loading_table` | `bool` | Loading state indicator for table components |
+| `loading_data` | `bool` | Loading state indicator for data loading operations |
+| `loading_message` | `str` | Current loading message for UI feedback |
 | `products` | `List[str]` | Available product hierarchy levels |
 | `locations` | `List[str]` | Available location hierarchy levels |
 | `levels` | `List[str]` | Available aggregation levels |
@@ -44,6 +49,52 @@ def initialize_data(self) -> None:
 ```python
 state = get_global_state()
 state.initialize_data()
+```
+
+##### `set_loading_state(component: str, loading: bool, message: str = "") -> None`
+
+Sets the loading state for a specific UI component.
+
+```python
+def set_loading_state(self, component: str, loading: bool, message: str = "") -> None:
+    """Set loading state for a specific component."""
+```
+
+**Parameters:**
+- `component` (str): Component name ('charts', 'table', 'data')
+- `loading` (bool): Loading state (True for loading, False for complete)
+- `message` (str, optional): Loading message for UI feedback
+
+**Usage:**
+```python
+state = get_global_state()
+state.set_loading_state('charts', True, "Loading chart data...")
+# ... perform chart operations ...
+state.set_loading_state('charts', False)
+```
+
+##### `is_loading(component: str = None) -> bool`
+
+Checks if a component is in loading state.
+
+```python
+def is_loading(self, component: str = None) -> bool:
+    """Check if a component or any component is loading."""
+```
+
+**Parameters:**
+- `component` (str, optional): Specific component to check ('charts', 'table', 'data')
+
+**Returns:**
+- `bool`: True if loading, False if not. If no component specified, returns True if any component is loading.
+
+**Usage:**
+```python
+state = get_global_state()
+if state.is_loading('charts'):
+    print("Charts are loading...")
+if state.is_loading():  # Check if any component is loading
+    print("Some component is loading...")
 ```
 
 ##### `load_sample_data(path: str = None) -> pl.DataFrame`

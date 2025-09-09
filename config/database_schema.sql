@@ -1,38 +1,49 @@
 -- DuckDB Schema for Forecasting Application
 -- Optimized for time series forecasting with product and location hierarchies
 
+-- Drop existing tables if they exist
+DROP TABLE IF EXISTS da.product_clusters;
+DROP TABLE IF EXISTS da.forecasts;
+DROP TABLE IF EXISTS da.model_validation;
+
 -- Product Hierarchy Table (based on phierarchy function in sql.py)
-CREATE TABLE da.product_hierarchy (
-    demantra_item_skey BIGINT PRIMARY KEY,
-    business_sector VARCHAR,
-    business_unit VARCHAR,
-    franchise VARCHAR,
-    product_line VARCHAR,
-    ibp_level_5 VARCHAR,
-    ibp_level_6 VARCHAR,
-    ibp_level_7 VARCHAR,
-    catalog_number VARCHAR NOT NULL,
-    uom VARCHAR,
-    pack_content VARCHAR,
+CREATE TABLE IF NOT EXISTS da.product_hierarchy (
+    demantra_item_skey BIGINT,
+    business_sector VARCHAR(100),
+    business_unit VARCHAR(100),
+    franchise VARCHAR(100),
+    product_line VARCHAR(100),
+    ibp_level_5 VARCHAR(100),
+    ibp_level_6 VARCHAR(100),
+    ibp_level_7 VARCHAR(100),
+    catalog_number VARCHAR(50) NOT NULL,
+    uom VARCHAR(20),
+    pack_content VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Enable column defaults for this table
+ALTER TABLE da.product_hierarchy SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
 
 -- Location Hierarchy Table (based on lhierarchy function in sql.py)
-CREATE TABLE da.location_hierarchy (
-    location_skey BIGINT PRIMARY KEY,
-    selling_division VARCHAR,
-    area VARCHAR,
-    stryker_group_region VARCHAR,
-    region VARCHAR,
-    country VARCHAR NOT NULL,
+CREATE TABLE IF NOT EXISTS da.location_hierarchy (
+    location_skey BIGINT,
+    selling_division VARCHAR(100),
+    area VARCHAR(100),
+    stryker_group_region VARCHAR(100),
+    region VARCHAR(100),
+    country VARCHAR(100) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Enable column defaults for this table
+ALTER TABLE da.location_hierarchy SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
+
 -- Main Fact Table for Historical Data (based on sales_actuals function in sql.py)
-CREATE TABLE da.sales_actuals (
-    id BIGINT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS da.sales_actuals (
+    id BIGINT,
     item_skey BIGINT NOT NULL,
     location_skey BIGINT NOT NULL,
     sales_date DATE NOT NULL,
@@ -50,51 +61,49 @@ CREATE TABLE da.sales_actuals (
     l1_stat_final_rev DECIMAL(38,8),
     l2_stat_final_rev DECIMAL(38,8),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Foreign key constraints
-    FOREIGN KEY (item_skey) REFERENCES da.product_hierarchy(demantra_item_skey),
-    FOREIGN KEY (location_skey) REFERENCES da.location_hierarchy(location_skey)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Enable column defaults for this table
+ALTER TABLE da.sales_actuals SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
+
 -- Clustering Results Table
-CREATE TABLE da.product_clusters (
-    cluster_id VARCHAR PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS da.product_clusters (
+    cluster_id VARCHAR(255),
     item_skey BIGINT NOT NULL,
     location_skey BIGINT NOT NULL,
     cluster_number INTEGER NOT NULL,
-    cluster_features JSON, -- Store feature vector as JSON
+    cluster_features STRING, -- Use STRING for JSON in Databricks
     silhouette_score DECIMAL(15,6),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    FOREIGN KEY (item_skey) REFERENCES da.product_hierarchy(demantra_item_skey),
-    FOREIGN KEY (location_skey) REFERENCES da.location_hierarchy(location_skey),
-    UNIQUE(item_skey, location_skey) -- One cluster per product-location combination
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Enable column defaults for this table
+ALTER TABLE da.product_clusters SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
+
 -- Forecast Results Table
-CREATE TABLE da.forecasts (
-    forecast_id BIGINT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS da.forecasts (
+    forecast_id BIGINT,
     item_skey BIGINT NOT NULL,
     location_skey BIGINT NOT NULL,
     forecast_date DATE NOT NULL,
     forecast_horizon INTEGER NOT NULL, -- months ahead
-    model_type VARCHAR NOT NULL, -- 'NHITS', 'Ensemble', etc.
+    model_type VARCHAR(50) NOT NULL, -- 'NHITS', 'Ensemble', etc.
     forecast_value DECIMAL(15,2) NOT NULL,
     confidence_lower DECIMAL(15,2),
     confidence_upper DECIMAL(15,2),
-    model_version VARCHAR,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    FOREIGN KEY (item_skey) REFERENCES da.product_hierarchy(demantra_item_skey),
-    FOREIGN KEY (location_skey) REFERENCES da.location_hierarchy(location_skey)
+    model_version VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Enable column defaults for this table
+ALTER TABLE da.forecasts SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
+
 -- Model Performance Metrics Table
-CREATE TABLE da.model_validation (
-    validation_id BIGINT PRIMARY KEY,
-    model_type VARCHAR NOT NULL,
+CREATE TABLE IF NOT EXISTS da.model_validation (
+    validation_id BIGINT,
+    model_type VARCHAR(50) NOT NULL,
     validation_date DATE NOT NULL,
     validation_period_months INTEGER NOT NULL,
     mae DECIMAL(10,4),
@@ -103,9 +112,12 @@ CREATE TABLE da.model_validation (
     accuracy_percentage DECIMAL(5,2),
     forecast_bias DECIMAL(10,4),
     silhouette_score DECIMAL(15,6),
-    validation_details JSON, -- Store detailed validation results
+    validation_details STRING, -- Use STRING for JSON in Databricks
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Enable column defaults for this table
+ALTER TABLE da.model_validation SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
 
 -- Indexes for Performance
 CREATE INDEX idx_sales_actuals_date ON da.sales_actuals(sales_date);
@@ -124,12 +136,31 @@ CREATE INDEX idx_location_hierarchy_region ON da.location_hierarchy(region);
 CREATE INDEX idx_location_hierarchy_country ON da.location_hierarchy(country);
 CREATE INDEX idx_location_hierarchy_area ON da.location_hierarchy(area);
 
+-- Unique indexes to replace PRIMARY KEY and FOREIGN KEY constraints
+CREATE UNIQUE INDEX idx_product_hierarchy_pk ON da.product_hierarchy(demantra_item_skey);
+CREATE UNIQUE INDEX idx_location_hierarchy_pk ON da.location_hierarchy(location_skey);
+CREATE UNIQUE INDEX idx_sales_actuals_pk ON da.sales_actuals(id);
+CREATE UNIQUE INDEX idx_product_clusters_pk ON da.product_clusters(cluster_id);
+CREATE UNIQUE INDEX idx_forecasts_pk ON da.forecasts(forecast_id);
+CREATE UNIQUE INDEX idx_model_validation_pk ON da.model_validation(validation_id);
+
+-- Relationship indexes to maintain referential integrity
+CREATE INDEX idx_sales_actuals_item_fk ON da.sales_actuals(item_skey);
+CREATE INDEX idx_sales_actuals_location_fk ON da.sales_actuals(location_skey);
+CREATE INDEX idx_product_clusters_item_fk ON da.product_clusters(item_skey);
+CREATE INDEX idx_product_clusters_location_fk ON da.product_clusters(location_skey);
+CREATE INDEX idx_forecasts_item_fk ON da.forecasts(item_skey);
+CREATE INDEX idx_forecasts_location_fk ON da.forecasts(location_skey);
+
+-- Unique index to replace UNIQUE constraint
+CREATE UNIQUE INDEX idx_product_clusters_unique ON da.product_clusters(item_skey, location_skey);
+
 -- Composite indexes for common filter combinations
 CREATE INDEX idx_sales_product_location_date ON da.sales_actuals(item_skey, location_skey, sales_date);
 CREATE INDEX idx_product_location_franchise_region ON da.product_hierarchy(franchise), da.location_hierarchy(region);
 
 -- Views for Common Queries
-CREATE VIEW v_product_location_summary AS
+CREATE OR REPLACE VIEW v_product_location_summary AS
 SELECT 
     p.catalog_number,
     p.franchise,
@@ -159,7 +190,7 @@ GROUP BY p.catalog_number, p.franchise, p.ibp_level_5, p.ibp_level_6,
          s.item_skey, s.location_skey;
 
 -- View for Forecast vs Actual Comparison
-CREATE VIEW v_forecast_accuracy AS
+CREATE OR REPLACE VIEW v_forecast_accuracy AS
 SELECT 
     f.item_skey,
     f.location_skey,
@@ -180,7 +211,7 @@ JOIN da.sales_actuals s ON f.item_skey = s.item_skey
 WHERE f.forecast_horizon = 1; -- 1-month ahead forecasts
 
 -- View for Time Series with Clusters
-CREATE VIEW v_time_series_clustered AS
+CREATE OR REPLACE VIEW v_time_series_clustered AS
 SELECT 
     s.item_skey,
     s.location_skey,

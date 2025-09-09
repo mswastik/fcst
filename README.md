@@ -2,7 +2,7 @@
 
 A comprehensive forecasting application built with NiceGUI that provides advanced time series forecasting capabilities using machine learning models, with a focus on sales and revenue prediction.
 
-## 🚀 Features
+## 🚀 Features (Updated January 2025 - Version 2.1.0)
 
 - **Interactive Web Dashboard**: Modern web-based UI built with NiceGUI
 - **Multiple Forecasting Models**: Support for NHITS, ensemble models, and statistical forecasting
@@ -11,11 +11,16 @@ A comprehensive forecasting application built with NiceGUI that provides advance
 - **Hierarchical Data Support**: Product and location hierarchies for multi-level forecasting
 - **Real-time Visualization**: Interactive charts and dashboards for data exploration
 - **Model Comparison**: Side-by-side comparison of different forecasting approaches
+- **🔐 Microsoft OAuth2 SSO**: Enterprise-grade authentication with Azure Active Directory
+- **🛡️ Enhanced Security**: Secure user sessions and authentication middleware
+- **🔧 Modular Architecture**: Well-structured codebase with utility classes and error handling
+- **📱 Responsive UI**: Modern, responsive interface with loading states and notifications
 
 ## 📋 Table of Contents
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Authentication](#authentication)
 - [Architecture](#architecture)
 - [Core Components](#core-components)
 - [API Documentation](#api-documentation)
@@ -79,26 +84,76 @@ The application will start on `http://localhost:8000`
 4. **Validate Models**: Use "Validate Models" to assess forecast accuracy
 5. **View Results**: Explore charts and metrics in the dashboard
 
+## 🔐 Authentication
+
+The application now includes enterprise-grade authentication using Microsoft OAuth2 SSO through Azure Active Directory.
+
+### Setup
+
+1. **Azure AD Configuration**:
+   - Create an Azure AD application registration
+   - Configure redirect URI: `http://localhost:8000/auth/callback`
+   - Note the Client ID and Tenant ID
+
+2. **Environment Variables**:
+   ```env
+   MICROSOFT_CLIENT_ID=your-client-id-here
+   MICROSOFT_CLIENT_SECRET=your-client-secret-here
+   MICROSOFT_TENANT_ID=your-tenant-id-here
+   ```
+
+3. **Authentication Flow**:
+   - Users click "Login" to initiate OAuth2 flow
+   - Redirected to Microsoft login page
+   - Upon successful authentication, returned to application
+   - User information stored in secure session
+
+### Features
+
+- **Secure Sessions**: User authentication state maintained securely
+- **User Info Display**: Shows authenticated user name and email
+- **Logout Functionality**: Secure session termination
+- **Middleware Integration**: Automatic authentication checks for protected routes
+
 ## 🏗 Architecture
 
 The application follows a modular architecture with clear separation of concerns:
 
 ```
 fcst/
-├── main.py                 # Application entry point
-├── state_manager.py        # Centralized state management
-├── db_service.py          # Database operations
-├── data_service.py        # Data processing utilities
-├── forecasting/           # Forecasting models and logic
-│   ├── model_factory.py   # Model creation and configuration
-│   ├── data_processor.py  # Data cleaning and validation
-│   ├── model_validator.py # Model validation and metrics
-│   └── simple_forecaster.py # Simple NHITS pipeline
-├── ui/                    # User interface components
-│   ├── dashboard.py       # Main dashboard
-│   ├── components.py      # Reusable UI components
-│   └── charts.py          # Chart generation
-└── docs/                  # Documentation
+├── main.py                 # Application entry point with thread pool setup
+├── core/                   # Core application modules
+│   ├── auth_service.py     # Microsoft OAuth2 authentication
+│   ├── state_manager.py    # Centralized state management
+│   ├── db_service.py       # Database operations
+│   ├── data_service.py     # Data processing utilities
+│   ├── data_model.py       # Data model definitions
+│   ├── utils.py            # Common utilities and helpers
+│   └── sql.py              # SQL query definitions
+├── forecasting/            # Forecasting models and logic
+│   ├── model_factory.py    # Model creation and configuration
+│   ├── data_processor.py   # Data cleaning and validation
+│   ├── model_validator.py  # Model validation and metrics
+│   ├── simple_forecaster.py # Simple NHITS pipeline
+│   └── simple_pipeline.py  # Additional pipeline utilities
+├── ui/                     # User interface components
+│   ├── dashboard.py        # Main dashboard
+│   ├── components.py       # Reusable UI components
+│   ├── charts.py           # Chart generation
+│   ├── data.html           # Data display templates
+│   ├── pivot.js            # Pivot table functionality
+│   └── style.css           # Application styling
+├── docs/                   # Documentation
+│   ├── auth_service.md     # Authentication documentation
+│   ├── db_service.md       # Database service docs
+│   ├── model_validator.md  # Model validation docs
+│   ├── state_manager.md    # State management docs
+│   ├── utils.md            # Utilities documentation
+│   └── debugging_guide.md  # Comprehensive debugging guide
+└── config/                 # Configuration files
+    ├── app.yaml           # Application configuration
+    ├── config.json        # JSON configuration
+    └── database_schema.sql # Database schema
 ```
 
 ### Key Design Principles
@@ -425,5 +480,5 @@ For support and questions:
 
 ---
 
-**Last Updated**: January 2025
-**Version**: 2.0.0
+**Last Updated**: September 2025  
+**Version**: 2.1.0

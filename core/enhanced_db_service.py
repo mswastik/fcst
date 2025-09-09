@@ -68,7 +68,7 @@ class EnhancedDatabaseService:
             raise
 
     def execute_query(self, query: str, params: tuple = None, user_id: str = None) -> pl.DataFrame:
-        """Execute a query for a specific user and return Polars DataFrame with robust datetime handling"""
+        """Execute a query for a specific user and return Polars DataFrame using Arrow format"""
         if not user_id:
             raise ValueError("user_id is required for multi-user operation")
 
@@ -87,60 +87,24 @@ class EnhancedDatabaseService:
             else:
                 cursor.execute(query)
 
-            # Get column names
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            # Use Arrow format for direct conversion to Polars
+            arrow_table = cursor.fetchall_arrow()
+            df = pl.from_arrow(arrow_table)
 
-            # Get all rows
-            rows = cursor.fetchall()
+            # Handle any remaining datetime timezone issues
+            for col in df.columns:
+                if df[col].dtype == pl.Datetime:
+                    try:
+                        # Convert timezone-aware datetimes to UTC and remove timezone
+                        df = df.with_columns(
+                            pl.col(col).dt.convert_time_zone("UTC").dt.replace_time_zone(None)
+                        )
+                    except Exception:
+                        # If timezone conversion fails, convert to string
+                        df = df.with_columns(pl.col(col).cast(pl.Utf8))
 
-            # First, try to create DataFrame with automatic inference
-            if rows:
-                try:
-                    # Convert all rows to lists for better compatibility
-                    rows_as_lists = [list(row) for row in rows]
-                    df = pl.DataFrame(rows_as_lists, schema=columns, orient="row",infer_schema_length=20)
-
-                    # Check for datetime columns with timezone issues and fix them
-                    for col in df.columns:
-                        if df[col].dtype == pl.Datetime:
-                            try:
-                                # Try to convert timezone-aware datetimes to strings
-                                if df[col].dt.tz_localize("UTC").is_not_null().any():
-                                    df = df.with_columns(pl.col(col).cast(pl.Utf8))
-                            except Exception:
-                                # If timezone handling fails, convert to string
-                                df = df.with_columns(pl.col(col).cast(pl.Utf8))
-
-                    return df
-
-                except Exception as e:
-                    # If automatic inference fails, fall back to manual processing
-                    logger.warning(f"Automatic DataFrame creation failed, using manual processing: {e}")
-
-                    # Convert all values to strings to avoid type conflicts
-                    processed_rows = []
-                    for row in rows:
-                        processed_row = []
-                        for value in row:
-                            if value is not None:
-                                # Convert datetime objects to strings
-                                if hasattr(value, 'isoformat'):
-                                    processed_row.append(value.isoformat())
-                                else:
-                                    processed_row.append(str(value))
-                            else:
-                                processed_row.append(None)
-                        processed_rows.append(processed_row)
-
-                    # Create DataFrame with all string columns
-                    string_schema = {col: pl.Utf8 for col in columns}
-                    df = pl.DataFrame(processed_rows, schema=string_schema,infer_schema_length=20)
-
-                    return df
-            else:
-                # Handle empty results
-                df = pl.DataFrame(schema={col: pl.Utf8 for col in columns})
-                return df
+            cursor.close()
+            return df
 
         except Exception as e:
             logger.error(f"Query execution failed for user {user_id}: {e}")

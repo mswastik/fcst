@@ -132,6 +132,13 @@ def create_dashboard():
             )['locations_filt']
             filter_components.update_location_options(options)
         
+        if filter_name == 'product1':
+            filter_components.product_select2._props.update({'label': value})
+            options = get_filter_options(
+                filter_state.get('product1'), filter_state.get('location1')
+            )['products_filt']
+            filter_components.update_product_options(options)
+        
     async def process_filter_change(filter_state):
         """Process location/product/level filter changes"""
         print(f"DEBUG: process_filter_change called with filter_state: {filter_state}")

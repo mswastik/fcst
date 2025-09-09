@@ -29,7 +29,9 @@ class DataState:
     loading_charts: bool = False
     loading_table: bool = False
     loading_data: bool = False
-    loading_message: str = ""
+    loading_message_charts: str = ""
+    loading_message_table: str = ""
+    loading_message_data: str = ""
     
     # Constants
     products: List[str] = field(default_factory=lambda: [
@@ -57,11 +59,13 @@ class DataState:
         """Set loading state for a specific component."""
         if component == 'charts':
             self.loading_charts = loading
+            self.loading_message_charts = message
         elif component == 'table':
             self.loading_table = loading
+            self.loading_message_table = message
         elif component == 'data':
             self.loading_data = loading
-        self.loading_message = message
+            self.loading_message_data = message
     
     def is_loading(self, component: str = None) -> bool:
         """Check if a component or any component is loading."""
@@ -73,6 +77,17 @@ class DataState:
             return self.loading_data
         else:
             return self.loading_charts or self.loading_table or self.loading_data
+    
+    def get_loading_message(self, component: str) -> str:
+        """Get the loading message for a specific component."""
+        if component == 'charts':
+            return self.loading_message_charts
+        elif component == 'table':
+            return self.loading_message_table
+        elif component == 'data':
+            return self.loading_message_data
+        else:
+            return ""
     
     def initialize_data(self) -> None:
         """Initialize the application data."""

@@ -43,37 +43,34 @@ def create_dashboard():
         """Update all UI components after filter changes"""
         print(f"DEBUG: update_ui called with filtered_df: {filtered_df is not None}, rows: {len(filtered_df) if filtered_df is not None else 0}")
         try:
-            # Set loading states for both charts and table
+            # Note: Loading states should already be cleared by the calling function
+            # We don't set them to True here since data is already loaded
             state = get_global_state()
-            print(f"DEBUG: Setting loading states - before: charts={state.loading_charts}, table={state.loading_table}, data={state.loading_data}")
-            state.set_loading_state('charts', True, 'Updating charts...')
-            state.set_loading_state('table', True, 'Updating table...')
-            print(f"DEBUG: Loading states set - after: charts={state.loading_charts}, table={state.loading_table}, data={state.loading_data}")
-            
-            # Force UI update to show loading indicators (non-blocking)
+            print(f"DEBUG: Loading states at start of update_ui - charts: {state.loading_charts}, table: {state.loading_table}, data: {state.loading_data}")
+
+            # Force UI update to show current state (non-blocking)
             try:
                 await ui.run_javascript('void 0', timeout=1.0)  # Increased timeout for large datasets
             except Exception as js_error:
                 print(f"DEBUG: JavaScript update timeout (expected with large datasets): {js_error}")
-                # Continue anyway - loading indicators will show when components re-render
-            
-            # Update charts
+                # Continue anyway - components will re-render when updated
+
+            # Update charts (loading state should already be False)
             print("DEBUG: Calling update_charts")
             await update_charts(chart_components.column_chart_container,
                                chart_components.line_chart_container, filtered_df)
-            
-            # Clear chart loading states after successful rendering
-            state.set_loading_state('charts', False)
-            print(f"DEBUG: Chart loading states cleared - charts: {state.loading_charts}")
 
             # Update details table
             print("DEBUG: Calling create_table")
             await details_table.create_table(filtered_df, details_container)
-            
-            # Clear table loading state after successful rendering
+
+            # Ensure all loading states are cleared after UI update
+            state = get_global_state()
+            state.set_loading_state('charts', False)
             state.set_loading_state('table', False)
-            print(f"DEBUG: Table loading state cleared - table: {state.loading_table}")
-            
+            state.set_loading_state('data', False)
+            print(f"DEBUG: Final loading states - charts: {state.loading_charts}, table: {state.loading_table}, data: {state.loading_data}")
+
             print("DEBUG: UI update completed successfully")
         except Exception as e:
             # Clear loading states on error

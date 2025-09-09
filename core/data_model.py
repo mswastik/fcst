@@ -1,6 +1,6 @@
 import polars as pl
 from core.state_manager import get_global_state
-#from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any
 
 # Get the global state instance
 state = get_global_state()

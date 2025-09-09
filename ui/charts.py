@@ -11,12 +11,12 @@ def render_column_chart(container,filtered_df):
     state = get_global_state()
 
     print(f"DEBUG: Chart loading states - charts: {state.loading_charts}, table: {state.loading_table}, data: {state.loading_data}")
-    print(f"DEBUG: Loading message: '{state.loading_message}'")
+    print(f"DEBUG: Loading message: '{state.get_loading_message('charts')}'")
 
     with container:
         if state.is_loading('charts'):
             print("DEBUG: Showing loading indicator for column chart")
-            UIUtils.show_loading_indicator(container, state.loading_message or 'Loading chart data...')
+            UIUtils.show_loading_indicator(container, state.get_loading_message('charts') or 'Loading chart data...')
         else:
             print("DEBUG: Attempting to render column chart - not loading")
             try:
@@ -50,12 +50,12 @@ def render_line_chart(container,filtered_df):
     state = get_global_state()
 
     print(f"DEBUG: Chart loading states - charts: {state.loading_charts}, table: {state.loading_table}, data: {state.loading_data}")
-    print(f"DEBUG: Loading message: '{state.loading_message}'")
+    print(f"DEBUG: Loading message: '{state.get_loading_message('charts')}'")
 
     with container:
         if state.is_loading('charts'):
             print("DEBUG: Showing loading indicator for line chart")
-            UIUtils.show_loading_indicator(container, state.loading_message or 'Loading chart data...')
+            UIUtils.show_loading_indicator(container, state.get_loading_message('charts') or 'Loading chart data...')
         else:
             print("DEBUG: Attempting to render line chart - not loading")
             try:
@@ -116,14 +116,16 @@ async def update_charts(column_container, line_container, filtered_df):
 
     try:
         # Force UI update to show loading indicators
-        await ui.run_javascript('void 0', timeout=0.5)
+        #await ui.run_javascript('void 0', timeout=3.5)
+        render_column_chart(column_container, filtered_df)
+        render_line_chart(line_container, filtered_df)
     except Exception as js_error:
         print(f"DEBUG: JavaScript update timeout in update_charts (expected): {js_error}")
 
     # Render the charts while loading state is still True
-    render_column_chart(column_container, filtered_df)
-    render_line_chart(line_container, filtered_df)
+    #render_column_chart(column_container, filtered_df)
+    #render_line_chart(line_container, filtered_df)
 
     # Clear loading state only after successful rendering
-    state.set_loading_state('charts', False)
+    #state.set_loading_state('charts', False)
     print(f"DEBUG: Charts rendered, loading state cleared - charts: {state.loading_charts}")

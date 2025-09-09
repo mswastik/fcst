@@ -1,0 +1,87 @@
+2025-09-09 15:37:44,000 - database - INFO - Database logging initialized
+2025-09-09 15:37:44,002 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:37:44,002 - session_manager - INFO - Session manager logging initialized
+2025-09-09 15:37:44,848 - database - INFO - Database logging initialized
+2025-09-09 15:37:44,848 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:37:44,848 - session_manager - INFO - Session manager logging initialized
+2025-09-09 15:37:44,872 - database - INFO - Database logging initialized
+2025-09-09 15:37:44,872 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:37:44,872 - session_manager - INFO - Session manager logging initialized
+2025-09-09 15:41:30,297 - database - INFO - Database logging initialized
+2025-09-09 15:41:30,297 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:41:30,299 - session_manager - INFO - Session manager logging initialized
+2025-09-09 15:41:30,868 - database - INFO - Database logging initialized
+2025-09-09 15:41:30,868 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:41:30,868 - session_manager - INFO - Session manager logging initialized
+2025-09-09 15:42:56,493 - database - INFO - Database logging initialized
+2025-09-09 15:42:56,493 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:42:56,493 - session_manager - INFO - Session manager logging initialized
+2025-09-09 15:42:57,245 - database - INFO - Database logging initialized
+2025-09-09 15:42:57,245 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:42:57,245 - session_manager - INFO - Session manager logging initialized
+2025-09-09 15:52:51,962 - database - INFO - Database logging initialized
+2025-09-09 15:52:51,964 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 15:52:51,964 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:01:51,626 - database - INFO - Database logging initialized
+2025-09-09 16:01:51,626 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:01:51,626 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:01:52,440 - database - INFO - Database logging initialized
+2025-09-09 16:01:52,440 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:01:52,440 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:07:49,593 - database - INFO - Database logging initialized
+2025-09-09 16:07:49,593 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:07:49,593 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:07:50,283 - database - INFO - Database logging initialized
+2025-09-09 16:07:50,283 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:07:50,283 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:07:50,306 - database - INFO - Database logging initialized
+2025-09-09 16:07:50,306 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:07:50,306 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:09:18,363 - database - INFO - Database logging initialized
+2025-09-09 16:09:18,363 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:09:18,363 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:14:19,921 - database - INFO - Database logging initialized
+2025-09-09 16:14:19,921 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:14:19,921 - session_manager - INFO - Session manager logging initialized
+2025-09-09 16:23:39,477 - database - INFO - Database logging initialized
+2025-09-09 16:23:39,477 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 16:23:39,477 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:08:17,156 - database - INFO - Database logging initialized
+2025-09-09 17:08:17,156 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:08:17,156 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:18:56,828 - database - INFO - Database logging initialized
+2025-09-09 17:18:56,828 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:18:56,828 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:27:24,916 - database - INFO - Database logging initialized
+2025-09-09 17:27:24,916 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:27:24,916 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:32:18,817 - database - INFO - Database logging initialized
+2025-09-09 17:32:18,819 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:32:18,819 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:36:19,636 - database - INFO - Database logging initialized
+2025-09-09 17:36:19,639 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:36:19,639 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:38:38,336 - database - INFO - Database logging initialized
+2025-09-09 17:38:38,336 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:38:38,336 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:42:01,166 - database - INFO - Database logging initialized
+2025-09-09 17:42:01,168 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:42:01,168 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:46:52,031 - database - INFO - Database logging initialized
+2025-09-09 17:46:52,031 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:46:52,031 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:52:30,455 - database - INFO - Database logging initialized
+2025-09-09 17:52:30,455 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:52:30,455 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:56:42,719 - database - INFO - Database logging initialized
+2025-09-09 17:56:42,719 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:56:42,723 - session_manager - INFO - Session manager logging initialized
+2025-09-09 17:58:03,237 - database - INFO - Database logging initialized
+2025-09-09 17:58:03,237 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 17:58:03,237 - session_manager - INFO - Session manager logging initialized
+2025-09-09 18:03:01,720 - database - INFO - Database logging initialized
+2025-09-09 18:03:01,720 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 18:03:01,720 - session_manager - INFO - Session manager logging initialized
+2025-09-09 18:05:24,496 - database - INFO - Database logging initialized
+2025-09-09 18:05:24,496 - connection_pool - INFO - Connection pool logging initialized
+2025-09-09 18:05:24,496 - session_manager - INFO - Session manager logging initialized

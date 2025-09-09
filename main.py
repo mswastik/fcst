@@ -1,8 +1,18 @@
+"""
+FCST Application Main Entry Point
+Enhanced with Database Connection Pooling and Session Management
+"""
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
 from nicegui import ui, run #, app
 from core.state_manager import initialize_global_state
-#from core.auth_service import auth_service, AuthMiddleware
-#from fastapi import FastAPI
-#from ui.dashboard import create_dashboard
+# from core.auth_service import auth_service, AuthMiddleware
+# from fastapi import FastAPI
+from ui.dashboard import create_dashboard
 import concurrent.futures
 import sys
 import asyncio

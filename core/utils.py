@@ -71,6 +71,52 @@ class DataUtils:
         if df is None:
             return None
 
+        # Convert string datetime columns back to datetime objects
+        datetime_columns = []
+        for col in df.columns:
+            if df[col].dtype == pl.Utf8:
+                # Check if column contains datetime-like strings
+                try:
+                    # Try to parse first few values to see if they're datetime strings
+                    sample_values = df[col].head(5).to_list()
+                    datetime_like = True
+                    for val in sample_values:
+                        if val and isinstance(val, str):
+                            try:
+                                # Try parsing as ISO format
+                                datetime.fromisoformat(val.replace('Z', '+00:00'))
+                            except (ValueError, AttributeError):
+                                datetime_like = False
+                                break
+                        elif val is None:
+                            continue
+                        else:
+                            datetime_like = False
+                            break
+
+                    if datetime_like:
+                        datetime_columns.append(col)
+                except Exception:
+                    pass
+
+        # Convert identified datetime string columns to datetime objects
+        for col in datetime_columns:
+            try:
+                df = df.with_columns(
+                    pl.col(col).str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M:%S%.f%z", strict=False)
+                    .dt.convert_time_zone("UTC")
+                    .dt.replace_time_zone(None)
+                )
+            except Exception:
+                # If ISO parsing fails, try simpler format
+                try:
+                    df = df.with_columns(
+                        pl.col(col).str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S", strict=False)
+                    )
+                except Exception:
+                    # If all parsing fails, keep as string
+                    pass
+
         df = DataUtils.apply_column_mapping(df)
         df = DataUtils.cast_numeric_columns(df)
         return df

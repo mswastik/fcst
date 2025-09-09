@@ -2,17 +2,17 @@
 
 A comprehensive forecasting application built with NiceGUI that provides advanced time series forecasting capabilities using machine learning models, with a focus on sales and revenue prediction.
 
-## 🚀 Features (Updated January 2025 - Version 2.1.0)
+## 🚀 Features (Updated September 2025 - Version 2.2.0)
 
 - **Interactive Web Dashboard**: Modern web-based UI built with NiceGUI
 - **Multiple Forecasting Models**: Support for NHITS, ensemble models, and statistical forecasting
 - **Model Validation**: 3-month rolling validation with comprehensive accuracy metrics
-- **DuckDB Integration**: High-performance database backend for fast data processing
+- **🔧 Enhanced Database Service**: Advanced connection pooling, retry logic, and session management
+- **🔐 Flexible Authentication**: Support for both Databricks CLI and OAuth authentication
 - **Hierarchical Data Support**: Product and location hierarchies for multi-level forecasting
 - **Real-time Visualization**: Interactive charts and dashboards for data exploration
 - **Model Comparison**: Side-by-side comparison of different forecasting approaches
-- **🔐 Microsoft OAuth2 SSO**: Enterprise-grade authentication with Azure Active Directory
-- **🛡️ Enhanced Security**: Secure user sessions and authentication middleware
+- **🛡️ Enterprise Security**: Secure user sessions and connection management
 - **🔧 Modular Architecture**: Well-structured codebase with utility classes and error handling
 - **📱 Responsive UI**: Modern, responsive interface with loading states and notifications
 
@@ -123,9 +123,14 @@ The application follows a modular architecture with clear separation of concerns
 fcst/
 ├── main.py                 # Application entry point with thread pool setup
 ├── core/                   # Core application modules
+│   ├── enhanced_db_service.py # Enhanced database service with connection pooling
+│   ├── session_manager.py  # User session management and isolation
+│   ├── connection_pool.py  # Database connection pooling and management
+│   ├── retry_handler.py    # Automatic retry logic for failed operations
+│   ├── health_checker.py   # Connection health monitoring
 │   ├── auth_service.py     # Microsoft OAuth2 authentication
 │   ├── state_manager.py    # Centralized state management
-│   ├── db_service.py       # Database operations
+│   ├── db_service.py       # Legacy database operations (backward compatibility)
 │   ├── data_service.py     # Data processing utilities
 │   ├── data_model.py       # Data model definitions
 │   ├── utils.py            # Common utilities and helpers
@@ -144,8 +149,9 @@ fcst/
 │   ├── pivot.js            # Pivot table functionality
 │   └── style.css           # Application styling
 ├── docs/                   # Documentation
+│   ├── enhanced_db_service.md # Enhanced database service docs
 │   ├── auth_service.md     # Authentication documentation
-│   ├── db_service.md       # Database service docs
+│   ├── db_service.md       # Legacy database service docs
 │   ├── model_validator.md  # Model validation docs
 │   ├── state_manager.md    # State management docs
 │   ├── utils.md            # Utilities documentation
@@ -158,12 +164,30 @@ fcst/
 
 ### Key Design Principles
 
+- **Enhanced Database Service**: Connection pooling, retry logic, health checks, and session management
 - **State Management**: Centralized state using `DataState` class
 - **Dependency Injection**: Modular components with clear interfaces
 - **Database Abstraction**: Clean separation between data access and business logic
 - **Component-Based UI**: Reusable UI components for maintainability
+- **Authentication Flexibility**: Support for both Databricks CLI and OAuth authentication
 
 ## 🔧 Core Components
+
+### Enhanced Database Service (`enhanced_db_service.py`)
+Advanced database service with connection pooling, retry logic, and session management.
+
+**Key Features:**
+- Connection pooling with automatic health checks
+- Retry logic with exponential backoff for failed operations
+- User session management and isolation
+- Flexible authentication (Databricks CLI or OAuth)
+- Performance monitoring and statistics
+
+**Key Classes:**
+- `EnhancedDatabaseService`: Main enhanced database service class
+- `DatabaseSessionManager`: Manages user sessions and connections
+- `SimpleConnectionPool`: Lightweight connection pooling
+- `ConnectionHealthChecker`: Monitors connection health
 
 ### State Manager (`state_manager.py`)
 Manages application state including data, filters, and UI state.
@@ -172,8 +196,8 @@ Manages application state including data, filters, and UI state.
 - `DataState`: Central state container
 - Functions: `get_global_state()`, `initialize_global_state()`
 
-### Database Service (`db_service.py`)
-Handles all database operations with DuckDB backend.
+### Legacy Database Service (`db_service.py`)
+Original database operations with DuckDB backend (maintained for backward compatibility).
 
 **Key Features:**
 - CRUD operations for sales data
@@ -217,16 +241,46 @@ class DataState:
     def get_chart_data(self, chart_type: str) -> Optional[Dict[str, Any]]
 ```
 
-### Database Service
+### Enhanced Database Service
 
 ```python
-class DatabaseService:
-    """Database operations for DuckDB backend."""
+class EnhancedDatabaseService:
+    """Enhanced database service with connection pooling, retry logic, and session management."""
     
-    def get_sales_actuals(self, filters: Dict = None) -> pl.DataFrame
-    def get_filter_options(self) -> Dict[str, List[str]]
-    def save_forecast_results(self, results: pl.DataFrame) -> None
-    def get_model_validation_results(self) -> pl.DataFrame
+    def create_user_session(self, user_id: str, metadata: Dict[str, Any] = None) -> str:
+        """Create a new database session for a user."""
+    
+    def execute_in_session(self, session_id: str, func: Callable, user_id: str = None, *args, **kwargs) -> Any:
+        """Execute a database operation in a user session with retry logic."""
+    
+    @contextmanager
+    def get_connection(self, session_id: str, user_id: str = None):
+        """Get a database connection for a session."""
+    
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get database health status."""
+    
+    def get_session_stats(self) -> Dict[str, Any]:
+        """Get session statistics."""
+```
+
+### Database Session Manager
+
+```python
+class DatabaseSessionManager:
+    """Manages database sessions for multiple users with proper isolation."""
+    
+    def create_session(self, user_id: str, metadata: Dict[str, Any] = None) -> str:
+        """Create a new database session for a user."""
+    
+    def get_connection(self, session_id: str, user_id: str = None):
+        """Get a database connection for a session."""
+    
+    def execute_in_session(self, session_id: str, func: Callable, user_id: str = None, *args, **kwargs) -> Any:
+        """Execute a function within a database session with retry logic."""
+    
+    def get_session_stats(self) -> Dict[str, Any]:
+        """Get session statistics."""
 ```
 
 ### Model Validator

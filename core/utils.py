@@ -70,11 +70,49 @@ class DataUtils:
         """Apply all standard data preparation steps."""
         if df is None:
             return None
-
+        # Hard-coded conversion for SALES_DATE column
+        if 'sales_date' in df.columns and df['sales_date'].dtype == pl.Utf8:
+            try:
+                # First try timezone-aware ISO format: "2022-09-01T00:00:00 +00:00"
+                df = df.with_columns(
+                    pl.col('sales_date').str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M:%S %z", strict=False)
+                    .dt.convert_time_zone("UTC")
+                    .dt.replace_time_zone(None)
+                )
+            except Exception:
+                try:
+                    # Try timezone-aware ISO format without space: "2022-09-01T00:00:00+00:00"
+                    df = df.with_columns(
+                        pl.col('sales_date').str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M:%S%z", strict=False)
+                        .dt.convert_time_zone("UTC")
+                        .dt.replace_time_zone(None)
+                    )
+                except Exception:
+                    try:
+                        # Try standard datetime format: "2022-09-01 00:00:00"
+                        df = df.with_columns(
+                            pl.col('sales_date').str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S", strict=False)
+                        )
+                    except Exception:
+                        try:
+                            # Try ISO format without timezone: "2022-09-01T00:00:00"
+                            df = df.with_columns(
+                                pl.col('sales_date').str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M:%S", strict=False)
+                            )
+                        except Exception:
+                            try:
+                                # Try date only format: "2022-09-01"
+                                df = df.with_columns(
+                                    pl.col('sales_date').str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+                                )
+                            except Exception:
+                                # If all conversions fail, keep as string
+                                pass
+        print(df)
         # Convert string datetime columns back to datetime objects
         datetime_columns = []
         for col in df.columns:
-            if df[col].dtype == pl.Utf8:
+            if df[col].dtype == pl.Utf8 and col != 'sales_date':  # Skip sales_date as we already handled it
                 # Check if column contains datetime-like strings
                 try:
                     # Try to parse first few values to see if they're datetime strings

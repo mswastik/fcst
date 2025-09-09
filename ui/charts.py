@@ -117,15 +117,9 @@ async def update_charts(column_container, line_container, filtered_df):
     try:
         # Force UI update to show loading indicators
         #await ui.run_javascript('void 0', timeout=3.5)
-        render_column_chart(column_container, filtered_df)
-        render_line_chart(line_container, filtered_df)
+        await render_column_chart_async(column_container, filtered_df)
+        await render_line_chart_async(line_container, filtered_df)
     except Exception as js_error:
         print(f"DEBUG: JavaScript update timeout in update_charts (expected): {js_error}")
 
-    # Render the charts while loading state is still True
-    #render_column_chart(column_container, filtered_df)
-    #render_line_chart(line_container, filtered_df)
-
-    # Clear loading state only after successful rendering
-    #state.set_loading_state('charts', False)
     print(f"DEBUG: Charts rendered, loading state cleared - charts: {state.loading_charts}")

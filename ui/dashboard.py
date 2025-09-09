@@ -41,51 +41,143 @@ def create_dashboard():
     
     async def update_ui(filtered_df):
         """Update all UI components after filter changes"""
+        print(f"DEBUG: update_ui called with filtered_df: {filtered_df is not None}, rows: {len(filtered_df) if filtered_df is not None else 0}")
         try:
             # Set loading states for both charts and table
             state = get_global_state()
+            print(f"DEBUG: Setting loading states - before: charts={state.loading_charts}, table={state.loading_table}, data={state.loading_data}")
             state.set_loading_state('charts', True, 'Updating charts...')
             state.set_loading_state('table', True, 'Updating table...')
-
-            # Force UI update to show loading indicators
-            await ui.run_javascript('void 0', timeout=0.1)
-
+            print(f"DEBUG: Loading states set - after: charts={state.loading_charts}, table={state.loading_table}, data={state.loading_data}")
+            
+            # Force UI update to show loading indicators (non-blocking)
+            try:
+                await ui.run_javascript('void 0', timeout=1.0)  # Increased timeout for large datasets
+            except Exception as js_error:
+                print(f"DEBUG: JavaScript update timeout (expected with large datasets): {js_error}")
+                # Continue anyway - loading indicators will show when components re-render
+            
             # Update charts
+            print("DEBUG: Calling update_charts")
             await update_charts(chart_components.column_chart_container,
                                chart_components.line_chart_container, filtered_df)
+            
+            # Clear chart loading states after successful rendering
+            state.set_loading_state('charts', False)
+            print(f"DEBUG: Chart loading states cleared - charts: {state.loading_charts}")
 
             # Update details table
+            print("DEBUG: Calling create_table")
             await details_table.create_table(filtered_df, details_container)
-
+            
+            # Clear table loading state after successful rendering
+            state.set_loading_state('table', False)
+            print(f"DEBUG: Table loading state cleared - table: {state.loading_table}")
+            
+            print("DEBUG: UI update completed successfully")
         except Exception as e:
             # Clear loading states on error
             state = get_global_state()
+            print(f"DEBUG: Error in update_ui, clearing loading states: {e}")
             state.set_loading_state('charts', False)
             state.set_loading_state('table', False)
             ErrorHandler.handle_ui_update_error(e, "UI update")
     
     async def on_filter_change(filter_name, value):
         """Handle filter change events"""
+        print(f"DEBUG: Filter change detected - {filter_name}: {value}")
+        
+        # Immediately set loading states when filter changes
+        state = get_global_state()
+        state.set_loading_state('charts', True, 'Loading filtered data...')
+        state.set_loading_state('table', True, 'Loading filtered data...')
+        state.set_loading_state('data', True, 'Processing filters...')
+        print(f"DEBUG: Loading states set immediately on filter change - charts: {state.loading_charts}, table: {state.loading_table}")
+        
+        # Update the filter state
         filter_state[filter_name] = value
         
-        if filter_name == 'data_files':
-            dwn.df = generate_sample_data(f'data/{value}')
-            app.storage.user['dwn_df_json'] = dwn.df.write_json()
-            await update_ui(dwn.df.group_by(['SALES_DATE', 'Business Unit', 'Region']).sum())
+        # Force UI update to show loading indicators immediately
+        try:
+            await ui.run_javascript('void 0', timeout=0.5)
+        except Exception as js_error:
+            print(f"DEBUG: JavaScript update timeout on filter change (expected): {js_error}")
         
-        elif filter_name == 'location1':
+        # Process the filter change
+        if filter_name in ['location1', 'location2', 'product1', 'product2', 'level']:
+            print("DEBUG: Processing location/product/level filter change")
+            
+            # Check if we have complete filter conditions before loading data
+            load_data_condition = (
+                (filter_state.get('location2') and filter_state.get('location1')) and
+                (filter_state.get('product2') and filter_state.get('product1'))
+            )
+            print(f"DEBUG: Load data condition met: {load_data_condition}")
+            print(f"DEBUG: Current filter state: location1={filter_state.get('location1')}, location2={filter_state.get('location2')}, product1={filter_state.get('product1')}, product2={filter_state.get('product2')}")
+            
+            if load_data_condition:
+                print("DEBUG: All filters set, proceeding with data loading")
+                await process_filter_change(filter_state)
+            else:
+                print("DEBUG: Not all filters set yet, waiting for complete filter selection")
+                # Clear loading states since we're not processing yet
+                state.set_loading_state('charts', False)
+                state.set_loading_state('table', False)
+                state.set_loading_state('data', False)
+        elif filter_name == 'data_files':
+            print("DEBUG: Processing data file change")
+            await process_data_file_change(value)
+        
+        if filter_name == 'location1':
             filter_components.location_select2._props.update({'label': value})
             options = get_filter_options(
                 filter_state.get('product1'), filter_state.get('location1')
             )['locations_filt']
             filter_components.update_location_options(options)
         
-        elif filter_name == 'product1':
-            filter_components.product_select2._props.update({'label': value})
-            options = get_filter_options(
-                filter_state.get('product1'), filter_state.get('location1')
-            )['products_filt']
-            filter_components.update_product_options(options)
+    async def process_filter_change(filter_state):
+        """Process location/product/level filter changes"""
+        print(f"DEBUG: process_filter_change called with filter_state: {filter_state}")
+        try:
+            # Check data size before loading
+            print("DEBUG: Checking data size before loading...")
+            size_check_result = await check_data_size_before_loading(filter_state)
+            print(f"DEBUG: Data size check result: {size_check_result}")
+            
+            if size_check_result:
+                print("DEBUG: Data size check passed, loading filtered data...")
+                await load_filtered_data(filter_state)
+                print("DEBUG: Filtered data loading completed")
+            else:
+                print("DEBUG: Data size check failed, clearing loading states")
+                state = get_global_state()
+                state.set_loading_state('charts', False)
+                state.set_loading_state('table', False)
+                state.set_loading_state('data', False)
+        except Exception as e:
+            print(f"DEBUG: Error in process_filter_change: {e}")
+            import traceback
+            print(f"DEBUG: Full traceback: {traceback.format_exc()}")
+            state = get_global_state()
+            state.set_loading_state('charts', False)
+            state.set_loading_state('table', False)
+            state.set_loading_state('data', False)
+    
+    async def process_data_file_change(value):
+        """Process data file changes"""
+        try:
+            # Load sample data from database
+            state = get_global_state()
+            df = state.load_sample_data()
+            if df is not None:
+                app.storage.user['dwn_df_json'] = df.write_json()
+                await update_ui(df)
+        except Exception as e:
+            print(f"DEBUG: Error processing data file change: {e}")
+            state = get_global_state()
+            state.set_loading_state('charts', False)
+            state.set_loading_state('table', False)
+            state.set_loading_state('data', False)
         
         # Apply filters when both location and product filters are set
         load_data_condition = (
@@ -151,41 +243,63 @@ def create_dashboard():
             return True  # Proceed anyway if estimation fails
 
     async def load_filtered_data(filter_state):
-        """Load data from database with filters applied to minimize memory usage"""
+        """Load and process filtered data from database"""
+        print(f"DEBUG: load_filtered_data called with filter_state: {filter_state}")
         try:
-            UIUtils.show_info_message("Loading filtered data from database...")
-
+            print("DEBUG: Loading filtered data from database...")
             db_service = DatabaseUtils.get_database_service()
             if db_service is None:
+                print("DEBUG: Database service is None, clearing loading states")
+                state = get_global_state()
+                state.set_loading_state('charts', False)
+                state.set_loading_state('table', False)
+                state.set_loading_state('data', False)
                 return
 
             state = get_global_state()
 
-            # Set loading state for data
-            state.set_loading_state('data', True, 'Fetching data from database...')
-
             # Load data with filters applied at database level
+            print(f"DEBUG: Querying database with filters: location_col={filter_state.get('location1')}, location_val={filter_state.get('location2')}, product_col={filter_state.get('product1')}, product_val={filter_state.get('product2')}")
             dwn.df = db_service.get_filtered_sales_actuals(
                 location_col=filter_state.get('location1'),
                 location_val=filter_state.get('location2'),
                 product_col=filter_state.get('product1'),
                 product_val=filter_state.get('product2')
             )
+            
+            print(f"DEBUG: Database query completed, rows returned: {len(dwn.df) if dwn.df is not None else 0}")
+            
+            if dwn.df is None or len(dwn.df) == 0:
+                print("DEBUG: No data returned from database, clearing loading states")
+                state.set_loading_state('charts', False)
+                state.set_loading_state('table', False)
+                state.set_loading_state('data', False)
+                return
 
             # Apply standard data preparation
+            print("DEBUG: Applying data preparation...")
             dwn.df = DataUtils.prepare_data_for_ui(dwn.df)
+            print(f"DEBUG: Data preparation completed, final rows: {len(dwn.df)}")
 
             # Update state and storage
             state.df = dwn.df.clone()
-            state.full_df = dwn.df.clone()  # Store current filtered data as "full" for subsequent filtering
+            state.full_df = dwn.df.clone()
             state.filtered_df = dwn.df.clone()
             app.storage.user['dwn_df_json'] = dwn.df.write_json()
 
-            UIUtils.show_success_message(f"Successfully loaded {len(dwn.df):,} rows of filtered data")
+            print("DEBUG: State updated, calling update_ui...")
+            await update_ui(dwn.df)
+            print("DEBUG: update_ui completed successfully")
 
         except Exception as e:
+            print(f"DEBUG: Error in load_filtered_data: {e}")
+            import traceback
+            print(f"DEBUG: Full traceback: {traceback.format_exc()}")
+            state = get_global_state()
+            state.set_loading_state('charts', False)
+            state.set_loading_state('table', False)
+            state.set_loading_state('data', False)
             ErrorHandler.handle_data_loading_error(e, "Filtered data loading")
-            raise
         finally:
             # Clear loading state
             state.set_loading_state('data', False)

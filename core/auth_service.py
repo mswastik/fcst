@@ -141,8 +141,7 @@ def login_page(redirect_to: str = '/'):
             on_click=initiate_microsoft_login,
             icon='login'
         ).classes('w-full').props('color=primary')
-
-        ui.label('Access restricted to authorized personnel only').classes('text-xs text-gray-500 mt-4 text-center')
+        ui.label('SSO Login is yet implemented as it requires app registration in Azure').classes('text text-red-600 mt-4 text-center')
 
 
 @ui.page('/logout')

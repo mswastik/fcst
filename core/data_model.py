@@ -1,8 +1,5 @@
-import pandas as pd
 import polars as pl
-import random
-from datetime import datetime, timedelta
-from core.state_manager import get_global_state, DataState
+from core.state_manager import get_global_state
 from typing import Optional, Dict, Any
 
 # Get the global state instance
@@ -43,12 +40,22 @@ def generate_sample_data(path: str = None) -> pl.DataFrame:
     else:
         # Legacy mode for backward compatibility
         return state.load_sample_data(path)
+
 def get_filter_options(prod: Optional[str] = None, loc: Optional[str] = None) -> Dict[str, Any]:
     """Return filter options for UI dropdowns"""
-    from core.db_service import get_database_service
+    from core.utils import DatabaseUtils
     
     # Get options directly from database for better reliability
-    db_service = get_database_service()
+    db_service = DatabaseUtils.get_database_service()
+    if db_service is None:
+        return {
+            'products_filt': [],
+            'locations_filt': [],
+            'products': ['Franchise', 'IBP Level 5', 'IBP Level 6', 'CatalogNumber'],
+            'locations': ['Area', 'Region', 'Country'],
+            'levels': ['Franchise', 'IBP Level 5', 'IBP Level 6', 'CatalogNumber']
+        }
+    
     filter_options = db_service.get_filter_options()
     
     # Map the requested product/location to appropriate database fields
@@ -80,6 +87,13 @@ def get_filter_options(prod: Optional[str] = None, loc: Optional[str] = None) ->
 
 def get_chart_data(chart_type: str, filtered_df: pl.DataFrame) -> Optional[Dict[str, Any]]:
     """Get data formatted for charts"""
+    print(f"DEBUG: get_chart_data called with chart_type='{chart_type}', filtered_df={filtered_df is not None}")
+    if filtered_df is not None:
+        print(f"DEBUG: filtered_df has {len(filtered_df)} rows")
+        print(f"DEBUG: filtered_df columns: {list(filtered_df.columns) if hasattr(filtered_df, 'columns') else 'No columns attr'}")
+    
     # Update state with the provided filtered_df
     state.update_filtered_data(filtered_df)
-    return state.get_chart_data(chart_type)
+    result = state.get_chart_data(chart_type)
+    print(f"DEBUG: get_chart_data returning: {result is not None}")
+    return result

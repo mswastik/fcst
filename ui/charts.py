@@ -6,61 +6,124 @@ import polars as pl
 
 def render_column_chart(container,filtered_df):
     """Render column chart in the provided container with loading indicator"""
+    print(f"DEBUG: render_column_chart called - container: {container}, filtered_df: {filtered_df is not None}, rows: {len(filtered_df) if filtered_df is not None else 0}")
     container.clear()
     state = get_global_state()
 
+    print(f"DEBUG: Chart loading states - charts: {state.loading_charts}, table: {state.loading_table}, data: {state.loading_data}")
+    print(f"DEBUG: Loading message: '{state.loading_message}'")
+
     with container:
         if state.is_loading('charts'):
+            print("DEBUG: Showing loading indicator for column chart")
             UIUtils.show_loading_indicator(container, state.loading_message or 'Loading chart data...')
         else:
-            data = get_chart_data('column',filtered_df)
-            if data:
-                ui.echart({
-                    #'legend': {'data': [s['name'] for s in data['series']]}, # Add legend
-                    'xAxis': {'data': data['months']}, # Use the 'months' list for x-axis
-                    'yAxis': {'type': 'value'},
-                    'series': data['series'], # Use the pre-formatted series data
-                    'tooltip':{
-                        'trigger': 'axis',
-                    },
-                }).classes('w-full h-full')
-            else:
-                ui.label('No data to display').classes('text-center text-gray-500')
+            print("DEBUG: Attempting to render column chart - not loading")
+            try:
+                data = get_chart_data('column', filtered_df)
+                print(f"DEBUG: Column chart data result: {data is not None}")
+                if data:
+                    print(f"DEBUG: Column chart data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                    if 'series' in data:
+                        print(f"DEBUG: Column chart series count: {len(data['series'])}")
+                    ui.echart({
+                        #'legend': {'data': [s['name'] for s in data['series']]}, # Add legend
+                        'xAxis': {'data': data['months']}, # Use the 'months' list for x-axis
+                        'yAxis': {'type': 'value'},
+                        'series': data['series'], # Use the pre-formatted series data
+                        'tooltip':{
+                            'trigger': 'axis',
+                        },
+                    }).classes('w-full h-full')
+                    print("DEBUG: Column chart rendered successfully")
+                else:
+                    print("DEBUG: No column chart data available")
+                    ui.label('No data to display').classes('text-center text-gray-500')
+            except Exception as e:
+                print(f"DEBUG: Error rendering column chart: {e}")
+                ui.label(f'Chart error: {str(e)}').classes('text-center text-red-500')
 
 def render_line_chart(container,filtered_df):
     """Render line chart in the provided container with loading indicator"""
+    print(f"DEBUG: render_line_chart called - container: {container}, filtered_df: {filtered_df is not None}, rows: {len(filtered_df) if filtered_df is not None else 0}")
     container.clear()
     state = get_global_state()
 
+    print(f"DEBUG: Chart loading states - charts: {state.loading_charts}, table: {state.loading_table}, data: {state.loading_data}")
+    print(f"DEBUG: Loading message: '{state.loading_message}'")
+
     with container:
         if state.is_loading('charts'):
+            print("DEBUG: Showing loading indicator for line chart")
             UIUtils.show_loading_indicator(container, state.loading_message or 'Loading chart data...')
         else:
-            data = get_chart_data('line',filtered_df)
-            if data:
-                ui.echart({
-                    'xAxis': {'type':'time','axisLabel': {'formatter': '{MMM} {yy}'}},
-                    'yAxis': {'type': 'value'},
-                    'series': [
-                        {
+            print("DEBUG: Attempting to render line chart - not loading")
+            try:
+                data = get_chart_data('line', filtered_df)
+                print(f"DEBUG: Line chart data result: {data is not None}")
+                if data:
+                    print(f"DEBUG: Line chart data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                    if 'values' in data:
+                        print(f"DEBUG: Line chart values count: {len(data['values'])}")
+                    ui.echart({
+                        'xAxis': {'type':'time','axisLabel': {'formatter': '{MMM} {yy}'}},
+                        'yAxis': {'type': 'value'},
+                        'series': [
+                            {
+                                'type': 'line',
+                                'name': 'Actual',
+                                'data': [[data['categories'][i],data['values'][i]] for i in range(len(data['categories']))],
+                                'marker': {'enabled': True}
+                            }
+                        ] + ([{
                             'type': 'line',
-                            'name': 'Actual',
-                            'data': [[data['categories'][i],data['values'][i]] for i in range(len(data['categories']))],
-                            'marker': {'enabled': True}
-                        }
-                    ] + ([{
-                        'type': 'line',
-                        'name': 'Forecast',
-                        'data': [[data['categories'][i],data['forecast_values'][i]] for i in range(len(data['forecast_values']))],
-                        'marker': {'enabled': True},
-                        'color': '#FF0000' # Red color for forecast
-                    }] if data['forecast_values'] else []),
-                    'tooltip':{ 'trigger': 'axis',},
-                }).classes('w-full h-full')
-            else:
-                ui.label('No data to display').classes('text-center text-gray-500')
+                            'name': 'Forecast',
+                            'data': [[data['categories'][i],data['forecast_values'][i]] for i in range(len(data['forecast_values']))],
+                            'marker': {'enabled': True},
+                            'color': '#FF0000' # Red color for forecast
+                        }] if data['forecast_values'] else []),
+                        'tooltip':{ 'trigger': 'axis',},
+                    }).classes('w-full h-full')
+                    print("DEBUG: Line chart rendered successfully")
+                else:
+                    print("DEBUG: No line chart data available")
+                    ui.label('No data to display').classes('text-center text-gray-500')
+            except Exception as e:
+                print(f"DEBUG: Error rendering line chart: {e}")
+                ui.label(f'Chart error: {str(e)}').classes('text-center text-red-500')
 
-async def update_charts(column_container, line_container,filtered_df):
+async def render_column_chart_async(container, filtered_df):
+    """Async version of render_column_chart that handles loading states properly"""
+    print("DEBUG: render_column_chart_async called - clearing loading state and rendering")
+    state = get_global_state()
+    state.set_loading_state('charts', False)  # Clear loading state before rendering
+    render_column_chart(container, filtered_df)
+
+async def render_line_chart_async(container, filtered_df):
+    """Async version of render_line_chart that handles loading states properly"""
+    print("DEBUG: render_line_chart_async called - clearing loading state and rendering")
+    state = get_global_state()
+    state.set_loading_state('charts', False)  # Clear loading state before rendering
+    render_line_chart(container, filtered_df)
+
+async def update_charts(column_container, line_container, filtered_df):
     """Update both charts"""
-    render_column_chart(column_container,filtered_df)
-    render_line_chart(line_container,filtered_df)
+    print(f"DEBUG: update_charts called with filtered_df: {filtered_df is not None}")
+
+    # Keep loading state during chart rendering
+    state = get_global_state()
+    print(f"DEBUG: Chart loading state at start of update_charts: {state.loading_charts}")
+
+    try:
+        # Force UI update to show loading indicators
+        await ui.run_javascript('void 0', timeout=0.5)
+    except Exception as js_error:
+        print(f"DEBUG: JavaScript update timeout in update_charts (expected): {js_error}")
+
+    # Render the charts while loading state is still True
+    render_column_chart(column_container, filtered_df)
+    render_line_chart(line_container, filtered_df)
+
+    # Clear loading state only after successful rendering
+    state.set_loading_state('charts', False)
+    print(f"DEBUG: Charts rendered, loading state cleared - charts: {state.loading_charts}")

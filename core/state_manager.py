@@ -210,11 +210,39 @@ class DataState:
     
     def get_chart_data(self, chart_type: str) -> Optional[Dict[str, Any]]:
         """Get data formatted for charts."""
+        print(f"DEBUG: state.get_chart_data called with chart_type='{chart_type}'")
         if self.filtered_df is None or len(self.filtered_df) == 0:
+            print("DEBUG: No filtered_df or empty dataframe")
             return None
         
         filtered_df = pl.DataFrame(self.filtered_df)
+        print(f"DEBUG: filtered_df has {len(filtered_df)} rows, columns: {list(filtered_df.columns)}")
+        
+        # Ensure SALES_DATE is datetime before processing
+        if 'SALES_DATE' in filtered_df.columns:
+            try:
+                # Check if it's already datetime
+                if filtered_df['SALES_DATE'].dtype != pl.Datetime:
+                    print(f"DEBUG: Converting SALES_DATE from {filtered_df['SALES_DATE'].dtype} to datetime")
+                    filtered_df = filtered_df.with_columns(
+                        pl.col('SALES_DATE').str.to_datetime().alias('SALES_DATE')
+                    )
+                else:
+                    print("DEBUG: SALES_DATE is already datetime")
+            except Exception as e:
+                print(f"DEBUG: Error converting SALES_DATE to datetime: {e}")
+                # Try alternative conversion
+                try:
+                    filtered_df = filtered_df.with_columns(
+                        pl.col('SALES_DATE').cast(pl.Datetime).alias('SALES_DATE')
+                    )
+                    print("DEBUG: Alternative datetime conversion successful")
+                except Exception as e2:
+                    print(f"DEBUG: Alternative datetime conversion failed: {e2}")
+                    return None
+        
         chart_data = filtered_df.clone()
+        print(f"DEBUG: Chart data prepared, proceeding to {chart_type} chart generation")
         
         # Group by month if toggle is active
         if self.by_month:

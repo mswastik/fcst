@@ -34,7 +34,6 @@ NUMERIC_COLUMNS = [
     'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev'
 ]
 
-
 class DataUtils:
     """Utility class for data manipulation operations."""
 

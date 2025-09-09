@@ -32,3 +32,5 @@ forecasting.duckdb
 forecasting1.duckdb
 forecasting2.duckdb
 .env.example
+.env
+.windsurf

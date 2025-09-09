@@ -30,10 +30,10 @@ class DatabaseService:
     def __init__(self, http_path: str = None, host: str = None, client_id: str = None, client_secret: str = None):
         if not self._initialized:
             # Use environment variables directly (same as working dashboard.py pattern)
-            self.http_path = http_path or os.getenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/62d47c983bb6df91")
-            self.host = host or os.getenv("DATABRICKS_HOST")
-            self.client_id = client_id or os.getenv("DATABRICKS_CLIENT_ID")
-            self.client_secret = client_secret or os.getenv("DATABRICKS_CLIENT_SECRET")
+            self.http_path = os.getenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/62d47c983bb6df91")
+            self.host = os.getenv("DATABRICKS_HOST")
+            self.client_id = os.getenv("DATABRICKS_CLIENT_ID")
+            self.client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
 
             self.conn = None
             self._connection_initialized = False
@@ -302,7 +302,7 @@ class DatabaseService:
             with self.conn.cursor() as cursor:
                 cursor.execute("""
                     SELECT COUNT(*) as count
-                    FROM product_clusters
+                    FROM da.product_clusters
                 """)
                 result = cursor.fetchone()
                 return result[0] if result else 0
@@ -317,7 +317,7 @@ class DatabaseService:
             with self.conn.cursor() as cursor:
                 cursor.execute("""
                     SELECT COUNT(*) as count
-                    FROM forecasts
+                    FROM da.forecasts
                 """)
                 result = cursor.fetchone()
                 return result[0] if result else 0
@@ -732,7 +732,7 @@ class DatabaseService:
 
             where_clause = " AND ".join(where_conditions) if where_conditions else ""
 
-            # Query with filters applied at database level
+            # Query with filters applied at database level - optimized for performance
             query = f"""
             SELECT
                 sa.sales_date,
@@ -766,10 +766,11 @@ class DatabaseService:
                 ph.uom,
                 ph.pack_content
             FROM da.sales_actuals sa
-            JOIN da.product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
-            JOIN da.location_hierarchy lh ON sa.location_skey = lh.location_skey
+            INNER JOIN da.product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
+            INNER JOIN da.location_hierarchy lh ON sa.location_skey = lh.location_skey
             {"WHERE " + where_clause if where_clause else ""}
-            ORDER BY sa.sales_date
+            ORDER BY sa.sales_date DESC, sa.item_skey, sa.location_skey
+            LIMIT 1000000
             """
 
             with self.conn.cursor() as cursor:

@@ -60,11 +60,14 @@ class AuthHeader:
             ).classes('text-sm').props('color=secondary outline')
         else:
             # Login button
-            ui.button(
+            lb= ui.button(
                 'Login',
                 on_click=self._handle_login,
                 icon='login'
             ).classes('text-sm').props('color=primary')
+            with lb:
+                ui.tooltip('Not Implemented').classes('bg-gray-200 text-red-600')
+            lb.disable()
 
     def _handle_login(self):
         """Handle login button click."""
@@ -94,22 +97,6 @@ class FilterComponents:
             self._create_location_selects()
             self._create_product_selects()
             self._create_level_select()
-            #self._create_data_files_select()
-            #self._create_get_data_button()
-    """
-    def _create_data_files_select(self):
-        '''Create data files selection dropdown - now loads from DuckDB.'''
-        '''return ui.select(
-            label='Load Data',
-            options=['Load from Database'],
-            with_input=True,
-            on_change=lambda e: self.on_filter_change('data_files', e.value)
-            ).classes('w-40')'''
-        return ui.button(
-            'Load Data',
-            on_click=lambda e: self.on_filter_change('data_files', e)
-        ).classes('ml-5 mt-3')
-    """
     
     def _create_location_selects(self):
         """Create location filter dropdowns."""
@@ -149,26 +136,7 @@ class FilterComponents:
         ).classes('w-40')
         
         return self.product_select1, self.product_select2
-    '''
-    def _on_product_hierarchy_change(self, value):
-        """Handle product hierarchy selection change."""
-        # Update the filter state
-        self.on_filter_change('product1', value)
-        
-        # Update the second dropdown label and get new options
-        self.product_select2._props.update({'label': value})
-        
-        # Get updated options based on the selected hierarchy level
-        from core.state_manager import get_global_state
-        from core.data_model import get_filter_options
-        
-        # Use the data_model function which properly handles the database lookup
-        options = get_filter_options(prod=value, loc=self.filter_state.get('location1'))
-        
-        # Update the options in the second dropdown
-        self.product_select2.options = options['products_filt']
-        self.product_select2.update()
-    '''
+
     def _create_level_select(self):
         """Create level selection dropdown."""
         return ui.select(
@@ -177,15 +145,7 @@ class FilterComponents:
             clearable=True,
             on_change=lambda e: self.on_filter_change('level', e.value)
         ).classes('w-40')
-    '''
-    def _create_get_data_button(self):
-        """Create the Get Data button."""
-        return ui.button('Get Data', on_click=self._show_download_dialog).classes('ml-auto')
-    
-    def _show_download_dialog(self):
-        """Show the data download dialog."""
-        DownloadDialog().show()
-    '''
+
     def update_location_options(self, options: list):
         """Update location select options."""
         if hasattr(self, 'location_select2'):
@@ -198,81 +158,6 @@ class FilterComponents:
             self.product_select2.options = options
             self.product_select2.update()
 
-'''
-class DownloadDialog:
-    """Handles the data download dialog functionality."""
-    
-    def __init__(self):
-        self.dwn_data = self._create_download_data()
-    
-    def _create_download_data(self):
-        """Create download data object."""
-        class DownloadData:
-            def __init__(self):
-                self.lhv, self.lvv, self.phv, self.pvv, self.pmv, self.fmv = '', '', '', '', 36, 24
-                self.sp = False
-                self.row_lab = ''
-        return DownloadData()
-    
-    def show(self):
-        """Show the download dialog."""
-        with ui.dialog() as dialog, ui.card():
-            ui.label("Select filter parameters to download")
-            self._create_dialog_content()
-            self._create_dialog_buttons(dialog)
-            self._create_progress_indicators()
-        dialog.open()
-    
-    def _create_dialog_content(self):
-        """Create the main content of the dialog."""
-        with ui.row():
-            ui.select(
-                options=['StrykerGroupRegion', 'Region', 'Country'],
-                label='Location'
-            ).bind_value(self.dwn_data, 'lhv').classes('w-48')
-            ui.input(
-                label='Location Values',
-                placeholder='Enter comma separated values'
-            ).bind_value(self.dwn_data, 'lvv').classes('w-80')
-        
-        with ui.row():
-            ui.select(
-                options=['Franchise', 'Business_Unit', 'IBP_Level_5', 'CatalogNumber'],
-                label='Product'
-            ).bind_value(self.dwn_data, 'phv').classes('w-48')
-            ui.input(
-                label='Product Values',
-                placeholder='Enter comma separated values'
-            ).bind_value(self.dwn_data, 'pvv').classes('w-80')
-        
-        with ui.row():
-            ui.number(label='Past Months').bind_value(self.dwn_data, 'pmv')
-            ui.number(label='Future Months').bind_value(self.dwn_data, 'fmv')
-    
-    def _create_dialog_buttons(self, dialog):
-        """Create dialog action buttons."""
-        with ui.row():
-            ui.button('Download', on_click=self._handle_download)
-            ui.button('Cancel', on_click=dialog.close).classes('ml-auto')
-    
-    def _create_progress_indicators(self):
-        """Create progress indicators."""
-        with ui.row():
-            ui.spinner(size='lg').bind_visibility(self.dwn_data, 'sp')
-            ui.label('').bind_text(self.dwn_data, 'row_lab')
-            self.time_lab = ui.label()
-            self.timer = ui.timer(1.0, self._update_timer, active=False)
-    
-    def _handle_download(self):
-        """Handle the download process."""
-        # Placeholder for actual download logic
-        ui.notify('Download functionality would be implemented here', type='info')
-    
-    def _update_timer(self):
-        """Update the timer display."""
-        # Timer update logic would go here
-        pass
-    '''
 
 class ChartComponents:
     """Handles chart-related UI components."""
@@ -651,7 +536,7 @@ class DetailsTable:
             UIUtils.show_loading_indicator(self.table_container, 'Loading table data...')
 
         # Force UI update to show loading state
-        await ui.run_javascript('void 0', timeout=0.1)
+        await ui.run_javascript('void 0', timeout=2.5)
 
         try:
             if len(filtered_df) == 0:

@@ -18,14 +18,17 @@ from core.utils import DataUtils, DatabaseUtils, UIUtils, ErrorHandler
 class AuthHeader:
     """Handles authentication header component with login/logout functionality."""
 
-    def create_header(self):
-        """Create the authentication header with user info and login/logout buttons."""
-        with ui.header().classes('bg-white shadow-sm border-b'):
-            with ui.row().classes('w-full justify-between items-center px-4 py-0'):
-                # App title
-                ui.label('ML Integration').classes('text-lg font-bold text-gray-800')
-
-                # User info and authentication buttons
+    def create_header(self, current_page=None):
+        """Create the authentication header with navigation, user info and login/logout buttons."""
+        with ui.header().classes('bg-white shadow-sm border-b py-1'):
+            with ui.row().classes('w-full justify-between items-center px-4 py-1'):
+                # Left side: App title and navigation
+                with ui.row().classes('items-center gap-4'):
+                    ui.label('ML Integration').classes('text-lg font-bold text-gray-800 mr-4')
+                    # Navigation links
+                    self._create_navigation_links(current_page)
+                
+                # Right side: User info and auth buttons
                 with ui.row().classes('items-center gap-4'):
                     self._create_user_info()
                     self._create_auth_buttons()
@@ -44,9 +47,30 @@ class AuthHeader:
         else:
             # Show not authenticated message
             with ui.row().classes('items-center gap-x-2'):
-                ui.icon('warning').classes('text-orange-500')
-                ui.label('Not authenticated').classes('text-sm text-gray-600')
+                ui.icon('warning').classes('mx-auto text-orange-500')
+                ui.label('Not authenticated').classes('mx-auto text-sm text-gray-600')
 
+    def _create_navigation_links(self, current_page=None):
+        """Create navigation links for all pages."""
+        pages = [
+            ('/', 'Dashboard'),
+            ('/raw_data', 'Raw Data'),
+            ('/llms', 'LLMs'),
+            ('/agent', 'Agent')
+        ]
+        
+        with ui.row().classes('items-center gap-1'):
+            for route, name in pages:
+                is_active = (current_page == route) or (current_page is None and route == '/')
+                button_classes = 'text-sm px-3 py-1 rounded transition-colors duration-200'
+                if is_active:
+                    button_classes += ' bg-blue-100 text-blue-700 font-semibold'
+                else:
+                    button_classes += ' text-gray-600 hover:bg-gray-100'
+                
+                # Create the link button
+                ui.link(name, route).classes(button_classes).classes('no-underline')
+            
     def _create_auth_buttons(self):
         """Create login/logout buttons based on authentication status."""
         user_info = auth_service.get_user_info()
@@ -174,14 +198,48 @@ class ChartComponents:
         return self.column_chart_container, self.line_chart_container
     
     def _create_column_chart(self):
-        """Create column chart container."""
-        #with ui.column().classes('w-1/2 h-96 gap-0'):
-        return ui.card().classes('flex-1 w-1/2 h-96')   #.classes('w-full h-full')
-    
+        # Create card with fixed height and flex column layout
+        card = ui.card().classes('flex-1 w-1/2 h-[400px] flex flex-col p-0 overflow-hidden')
+        with card:
+            # Title bar with fixed height
+            with ui.row().classes('w-full px-4 py-2 border-b'):
+                ui.label('Sales by Month').classes('text-md font-medium')
+                ui.separator().props('vertical').classes('mx-2')
+                self.column_chart_title = ui.label().classes('text-sm font-medium')
+            
+            # Chart container that takes remaining space and is scrollable
+            with ui.column().classes('w-full flex-1 min-h-0 p-2'):
+                self.column_chart_content = ui.column().classes('w-full h-full')
+                print(f"DEBUG: Created column chart content container: {self.column_chart_content}")
+        return card
+            
     def _create_line_chart(self):
-        """Create line chart container."""
-        #with ui.column().classes('w-1/2 h-96 gap-0'):
-        return ui.card().classes('flex-1 w-1/2 h-96')  #.classes('w-full h-full')
+        # Create card with fixed height and flex column layout
+        card = ui.card().classes('flex-1 w-1/2 h-[400px] flex flex-col p-0 overflow-hidden')
+        with card:
+            # Title bar with fixed height
+            with ui.row().classes('w-full px-4 py-2 border-b'):
+                ui.label('Forecast Trend').classes('text-md font-medium')
+                ui.separator().props('vertical').classes('mx-2')
+                self.line_chart_title = ui.label().classes('text-sm font-medium')
+            
+            # Chart container that takes remaining space and is scrollable
+            with ui.column().classes('w-full flex-1 min-h-0 p-2'):
+                self.line_chart_content = ui.column().classes('w-full h-full')
+                print(f"DEBUG: Created line chart content container: {self.line_chart_content}")
+        return card
+            
+    def update_chart_titles(self, filter_state):
+        """Update chart titles with current filter values."""
+        # Get selected values from filter state
+        location = filter_state.get('location', 'All Locations')
+        product = filter_state.get('product', 'All Products')
+        
+        # Update titles if they exist
+        if hasattr(self, 'column_chart_title'):
+            self.column_chart_title.text = f"{product} | {location}"
+        if hasattr(self, 'line_chart_title'):
+            self.line_chart_title.text = f"{product} | {location}"
 
 
 class ActionButtons:

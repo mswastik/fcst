@@ -28,7 +28,7 @@ def create_dashboard():
     
     # Add authentication header
     auth_header = AuthHeader()
-    auth_header.create_header()
+    auth_header.create_header('/')
     
     # Initialize filter state
     filter_state = {
@@ -56,9 +56,14 @@ def create_dashboard():
                 # Continue anyway - components will re-render when updated
 
             # Update charts (loading state should already be False)
-            print("DEBUG: Calling update_charts")
-            await update_charts(chart_components.column_chart_container,
-                               chart_components.line_chart_container, filtered_df)
+            print(f"DEBUG: Calling update_charts with containers - column: {chart_components.column_chart_content}, line: {chart_components.line_chart_content}")
+            try:
+                await update_charts(chart_components.column_chart_content,
+                                 chart_components.line_chart_content, filtered_df)
+                print("DEBUG: update_charts completed successfully")
+            except Exception as e:
+                print(f"DEBUG: Error in update_charts: {e}")
+                raise
 
             # Update details table
             print("DEBUG: Calling create_table")
@@ -292,6 +297,11 @@ def create_dashboard():
             app.storage.user['dwn_df_json'] = dwn.df.write_json()
 
             print("DEBUG: State updated, calling update_ui...")
+            # Update chart titles with current filter values
+            chart_components.update_chart_titles({
+                'location': filter_state.get('location2', 'All Locations'),
+                'product': filter_state.get('product2', 'All Products')
+            })
             await update_ui(dwn.df)
             print("DEBUG: update_ui completed successfully")
 
@@ -342,17 +352,27 @@ def raw_data_page():
      if 'dwn_df_json' in app.storage.user:
         df_json = app.storage.user['dwn_df_json']
      
+     # Add authentication header to raw_data page
+     from ui.components import AuthHeader
+     auth_header = AuthHeader()
+     auth_header.create_header('/raw_data')
+     
      ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>')
      ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>") 
      ui.add_body_html(f"{(Path(__file__).parent / 'data.html').read_text()}".replace('{{df_json}}', df_json))
 
 @ui.page("/llms")
 async def llm():
+    # Add authentication header to llms page
+    from ui.components import AuthHeader
+    auth_header = AuthHeader()
+    auth_header.create_header('/llms')
+    
     from databricks.connect import DatabricksSession
     from databricks.sdk import WorkspaceClient
     from databricks import sql
     from databricks.sdk.core import Config
-    from databricks import sdk
+    #from databricks import sdk
     from datetime import datetime, timedelta
     
     num_periods = 36
@@ -476,34 +496,21 @@ async def llm():
     with conn.cursor() as cursor:
         cursor.execute(query)
         df = pl.from_arrow(cursor.fetchall_arrow())
-        #print(df.head())
     conn.close()
     print(df)
     #spark.table("hive_metastore.da.Fact_Sales").limit(100)
     spark = DatabricksSession.builder.clusterId('0805-063508-emq3q7q8').getOrCreate()
-    #spark = DatabricksSession.builder.clusterId(os.environ['DB_CLUSTER_ID']).getOrCreate()
     #print(spark.table("hive_metastore.da.Fact_Sales1").limit(100))
     #df = spark.read.table("samples.nyctaxi.trips")
       # cfg with auth for Service Principal
-    '''
-    sp_cfg = sdk.config.Config()
-    # request handler
-    async def query(user, request: gr.Request):
-        # user's email
-        email = request.headers.get("X-Forwarded-Email")
-        # queries the database (or cache) to fetch user session using the SP
-        user_session = get_user_session(sp_cfg, email)
-        # user's access token
-        user_token = request.headers.get("X-Forwarded-Access-Token")
-        # queries the SQL Warehouse on behalf of the end-user
-        result = query_warehouse(user_token)
-        # save stats in user session
-        save_user_session(sp_cfg, email)
-    return result
-    '''
 
 @ui.page("/agent")
 async def agent():
+    # Add authentication header to agent page
+    from ui.components import AuthHeader
+    auth_header = AuthHeader()
+    auth_header.create_header('/agent')
+    
     from ddgs import DDGS
     from bs4 import BeautifulSoup
     import requests

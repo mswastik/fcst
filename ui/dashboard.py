@@ -89,15 +89,72 @@ def create_dashboard():
         """Handle filter change events"""
         print(f"DEBUG: Filter change detected - {filter_name}: {value}")
         
-        # Immediately set loading states when filter changes
+        # Update the filter state first
+        if filter_name:  # Only update if filter_name is not empty
+            filter_state[filter_name] = value
+        
+        # Get the current state
         state = get_global_state()
+        
+        # Set loading states
         state.set_loading_state('charts', True, 'Loading filtered data...')
         state.set_loading_state('table', True, 'Loading filtered data...')
         state.set_loading_state('data', True, 'Processing filters...')
-        print(f"DEBUG: Loading states set immediately on filter change - charts: {state.loading_charts}, table: {state.loading_table}")
         
-        # Update the filter state
-        filter_state[filter_name] = value
+        print(f"DEBUG: Loading states set - charts: {state.loading_charts}, table: {state.loading_table}")
+        
+        # Handle specific filter changes that require UI updates
+        if filter_name == 'location1':
+            # Update location options when location1 changes
+            try:
+                options = state.get_filter_options(
+                    filter_state.get('product1', 'Franchise'),
+                    value  # The new location1 value
+                )
+                if 'locations_filt' in options:
+                    filter_components.update_location_options(options['locations_filt'])
+                    print(f"DEBUG: Updated location options with {len(options['locations_filt'])} items")
+                
+                # Update level options based on the new filters
+                if 'levels' in options:
+                    filter_components.update_level_options(options['levels'])
+                    
+            except Exception as e:
+                print(f"Error updating location options: {e}")
+        
+        elif filter_name == 'product1':
+            # Update product options when product1 changes
+            try:
+                options = state.get_filter_options(
+                    value,  # The new product1 value
+                    filter_state.get('location1', 'Region')
+                )
+                if 'products_filt' in options:
+                    filter_components.update_product_options(options['products_filt'])
+                    print(f"DEBUG: Updated product options with {len(options['products_filt'])} items")
+                
+                # Update level options based on the new filters
+                if 'levels' in options:
+                    filter_components.update_level_options(options['levels'])
+                    
+            except Exception as e:
+                print(f"Error updating product options: {e}")
+        
+        # Force UI update to show loading indicators immediately
+        try:
+            await ui.run_javascript('void 0', timeout=0.5)
+        except Exception as js_error:
+            print(f"DEBUG: JavaScript update timeout on filter change (expected): {js_error}")
+        
+        # Process the filter change if we have all required filters
+        if filter_name in ['location1', 'location2', 'product1', 'product2', 'level']:
+            print("DEBUG: Processing location/product/level filter change")
+            
+            # Check if we have complete filter conditions before loading data
+            load_data_condition = (
+                (filter_state.get('location1') and filter_state.get('location2')) and
+                (filter_state.get('product1') and filter_state.get('product2'))
+            )
         
         # Force UI update to show loading indicators immediately
         try:
@@ -321,7 +378,35 @@ def create_dashboard():
         # Create filter components
         filter_components = FilterComponents(filter_state, on_filter_change)
         filter_components.create_filter_row()
-        # This functionality is now handled by the ViewDataDialog component
+        
+        # Initialize with default filter options
+        try:
+            state = get_global_state()
+            # Get initial filter options
+            options = state.get_filter_options()
+            
+            # Update the filter components with initial values
+            if 'products' in options and hasattr(filter_components, 'product_select1'):
+                filter_components.product_select1.options = options['products']
+                filter_components.product_select1.update()
+                
+            if 'products_filt' in options and hasattr(filter_components, 'product_select2'):
+                filter_components.update_product_options(options['products_filt'])
+                
+            if 'locations' in options and hasattr(filter_components, 'location_select1'):
+                filter_components.location_select1.options = options['locations']
+                filter_components.location_select1.update()
+                
+            if 'locations_filt' in options and hasattr(filter_components, 'location_select2'):
+                filter_components.update_location_options(options['locations_filt'])
+                
+            if 'levels' in options and hasattr(filter_components, 'level_select'):
+                filter_components.update_level_options(options['levels'])
+                
+            print("DEBUG: Initialized filter components with options")
+            
+        except Exception as e:
+            print(f"Error initializing filter components: {e}")
         
         # Main content area
         with ui.row().classes('w-full mt-2 ml-0 gap-2'):
@@ -333,17 +418,24 @@ def create_dashboard():
             action_buttons = ActionButtons(dwn, filter_state)
             action_buttons.create_action_buttons()
 
-        
         # Bottom details panel
         details_table = DetailsTable(filter_state, update_ui)
         details_container = details_table.create_details_container()
     
-    # Initialize UI
+    # Initialize UI with default filter values
     try:
-        # Call the sync version for initial setup
-        on_filter_change('', None)
-    except Exception:
-        pass
+        # Set default values if not already set
+        if not filter_state.get('location1'):
+            filter_state['location1'] = 'Region'
+        if not filter_state.get('product1'):
+            filter_state['product1'] = 'Franchise'
+            
+        # Trigger initial filter change to load data
+        ui.timer(0.1, lambda: on_filter_change('', None), once=True)
+        print("DEBUG: Initialized UI with default filter values")
+        
+    except Exception as e:
+        print(f"Error during UI initialization: {e}")
 
 @ui.page("/raw_data")
 def raw_data_page():

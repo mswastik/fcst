@@ -3,10 +3,13 @@ Enhanced Database Service with Multi-User Support
 Supports multiple concurrent users with separate database connections
 """
 import os
+import threading
+import time
 import logging
 import uuid
 from typing import Optional, List, Dict, Any, Tuple, Callable
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 import polars as pl
 
 # Import the updated multi-user connection manager
@@ -291,86 +294,160 @@ class EnhancedDatabaseService:
 
         return self.execute_query(query, tuple(params) if params else None, user_id)
 
-    def get_filter_options(self, user_id: str = None) -> Dict[str, List[str]]:
-        """Get available filter options from hierarchy tables for a specific user"""
-        # Use default user_id if not provided (for backward compatibility)
-        if not user_id:
-            user_id = "system"
+    # Cache for filter options with a 5-minute TTL
+    _filter_options_cache = {}
+    _last_refresh_time = 0
+    _cache_ttl = 300  # 5 minutes in seconds
+    _cache_lock = threading.Lock()
 
-        # Auto-create connection for default system user if it doesn't exist
-        try:
-            self.connection_manager.get_user_connection(user_id)
-        except ValueError:
-            self.connection_manager.create_user_connection(user_id)
+    def get_filter_options(self, user_id: str = None, force_refresh: bool = False) -> Dict[str, List[str]]:
+        """Get available filter options from hierarchy tables with caching.
+        
+        Args:
+            user_id: Optional user ID (defaults to 'system')
+            force_refresh: If True, bypass cache and refresh data
+            
+        Returns:
+            Dictionary of filter options
+        """
+        current_time = time.time()
+        cache_expired = (current_time - self._last_refresh_time) > self._cache_ttl
+        
+        # Return cached data if available and not forcing refresh
+        if not force_refresh and not cache_expired and self._filter_options_cache:
+            logger.debug("Returning cached filter options")
+            return self._filter_options_cache
+            
+        with self._cache_lock:
+            # Check again in case another thread already refreshed the cache
+            if not force_refresh and not cache_expired and self._filter_options_cache:
+                logger.debug("Returning cached filter options (double-checked)")
+                return self._filter_options_cache
+                
+            # Use default user_id if not provided
+            user_id = user_id or "system"
+            logger.info(f"Refreshing filter options for user {user_id}")
 
-        options = {}
+            try:
+                # Get or create connection
+                try:
+                    logger.debug(f"Getting connection for user {user_id}")
+                    self.connection_manager.get_user_connection(user_id)
+                except ValueError as ve:
+                    logger.warning(f"Creating new connection for user {user_id}: {ve}")
+                    self.connection_manager.create_user_connection(user_id)
 
-        try:
-            # Product filters - get as DataFrame and extract unique values safely
-            product_query = "SELECT DISTINCT franchise FROM da.product_hierarchy WHERE franchise IS NOT NULL ORDER BY franchise"
-            product_df = self.execute_query(product_query, user_id=user_id)
-            if product_df is not None and len(product_df) > 0 and 'franchise' in product_df.columns:
-                options['franchises'] = product_df['franchise'].unique().to_list()
-            else:
-                options['franchises'] = []
-
-            ibp5_query = "SELECT DISTINCT ibp_level_5 FROM da.product_hierarchy WHERE ibp_level_5 IS NOT NULL ORDER BY ibp_level_5"
-            ibp5_df = self.execute_query(ibp5_query, user_id=user_id)
-            if ibp5_df is not None and len(ibp5_df) > 0 and 'ibp_level_5' in ibp5_df.columns:
-                options['ibp_level_5s'] = ibp5_df['ibp_level_5'].unique().to_list()
-            else:
-                options['ibp_level_5s'] = []
-
-            ibp6_query = "SELECT DISTINCT ibp_level_6 FROM da.product_hierarchy WHERE ibp_level_6 IS NOT NULL ORDER BY ibp_level_6"
-            ibp6_df = self.execute_query(ibp6_query, user_id=user_id)
-            if ibp6_df is not None and len(ibp6_df) > 0 and 'ibp_level_6' in ibp6_df.columns:
-                options['ibp_level_6s'] = ibp6_df['ibp_level_6'].unique().to_list()
-            else:
-                options['ibp_level_6s'] = []
-
-            catalog_query = "SELECT DISTINCT catalog_number FROM da.product_hierarchy WHERE catalog_number IS NOT NULL ORDER BY catalog_number"
-            catalog_df = self.execute_query(catalog_query, user_id=user_id)
-            if catalog_df is not None and len(catalog_df) > 0 and 'catalog_number' in catalog_df.columns:
-                options['catalog_numbers'] = catalog_df['catalog_number'].unique().to_list()
-            else:
-                options['catalog_numbers'] = []
-
-            # Location filters
-            region_query = "SELECT DISTINCT region FROM da.location_hierarchy WHERE region IS NOT NULL ORDER BY region"
-            region_df = self.execute_query(region_query, user_id=user_id)
-            if region_df is not None and len(region_df) > 0 and 'region' in region_df.columns:
-                options['regions'] = region_df['region'].unique().to_list()
-            else:
-                options['regions'] = []
-
-            country_query = "SELECT DISTINCT country FROM da.location_hierarchy WHERE country IS NOT NULL ORDER BY country"
-            country_df = self.execute_query(country_query, user_id=user_id)
-            if country_df is not None and len(country_df) > 0 and 'country' in country_df.columns:
-                options['countries'] = country_df['country'].unique().to_list()
-            else:
-                options['countries'] = []
-
-            area_query = "SELECT DISTINCT area FROM da.location_hierarchy WHERE area IS NOT NULL ORDER BY area"
-            area_df = self.execute_query(area_query, user_id=user_id)
-            if area_df is not None and len(area_df) > 0 and 'area' in area_df.columns:
-                options['areas'] = area_df['area'].unique().to_list()
-            else:
-                options['areas'] = []
-
-        except Exception as e:
-            logger.error(f"Error getting filter options for user {user_id}: {e}")
-            # Return empty options on error
-            options = {
-                'franchises': [],
-                'ibp_level_5s': [],
-                'ibp_level_6s': [],
-                'catalog_numbers': [],
-                'regions': [],
-                'countries': [],
-                'areas': []
-            }
-
-        return options
+                options = {}
+                
+                # Single query to get all product hierarchy data
+                product_hierarchy_query = """
+                SELECT 
+                    ARRAY_AGG(DISTINCT franchise) FILTER (WHERE franchise IS NOT NULL) as franchises,
+                    ARRAY_AGG(DISTINCT ibp_level_5) FILTER (WHERE ibp_level_5 IS NOT NULL) as ibp_level_5s,
+                    ARRAY_AGG(DISTINCT ibp_level_6) FILTER (WHERE ibp_level_6 IS NOT NULL) as ibp_level_6s,
+                    ARRAY_AGG(DISTINCT catalog_number) FILTER (WHERE catalog_number IS NOT NULL) as catalog_numbers
+                FROM da.product_hierarchy
+                """
+                
+                # Single query to get all location hierarchy data
+                location_hierarchy_query = """
+                SELECT 
+                    ARRAY_AGG(DISTINCT region) FILTER (WHERE region IS NOT NULL) as regions,
+                    ARRAY_AGG(DISTINCT country) FILTER (WHERE country IS NOT NULL) as countries,
+                    ARRAY_AGG(DISTINCT area) FILTER (WHERE area IS NOT NULL) as areas
+                FROM da.location_hierarchy
+                """
+                
+                logger.debug("Executing filter options queries")
+                
+                # Execute queries in parallel
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    logger.debug("Submitting product hierarchy query")
+                    product_future = executor.submit(
+                        self.execute_query, 
+                        product_hierarchy_query,
+                        None,  # No params
+                        user_id
+                    )
+                    
+                    logger.debug("Submitting location hierarchy query")
+                    location_future = executor.submit(
+                        self.execute_query,
+                        location_hierarchy_query,
+                        None,  # No params
+                        user_id
+                    )
+                    
+                    # Process product hierarchy results
+                    try:
+                        logger.debug("Waiting for product hierarchy results")
+                        product_result = product_future.result()
+                        if product_result is not None and not product_result.is_empty():
+                            row = product_result.row(0, named=True)
+                            options.update({
+                                'franchises': row.get('franchises', []) or [],
+                                'ibp_level_5s': row.get('ibp_level_5s', []) or [],
+                                'ibp_level_6s': row.get('ibp_level_6s', []) or [],
+                                'catalog_numbers': row.get('catalog_numbers', []) or []
+                            })
+                            logger.debug(f"Got product options: {', '.join(k for k, v in options.items() if v)}")
+                        else:
+                            logger.warning("No product hierarchy data found")
+                    except Exception as e:
+                        logger.error(f"Error processing product hierarchy: {e}", exc_info=True)
+                    
+                    # Process location hierarchy results
+                    try:
+                        logger.debug("Waiting for location hierarchy results")
+                        location_result = location_future.result()
+                        if location_result is not None and not location_result.is_empty():
+                            row = location_result.row(0, named=True)
+                            options.update({
+                                'regions': row.get('regions', []) or [],
+                                'countries': row.get('countries', []) or [],
+                                'areas': row.get('areas', []) or []
+                            })
+                            logger.debug(f"Got location options: {', '.join(k for k, v in options.items() if v and k not in options.get('franchises', []))}")
+                        else:
+                            logger.warning("No location hierarchy data found")
+                    except Exception as e:
+                        logger.error(f"Error processing location hierarchy: {e}", exc_info=True)
+                
+                # Ensure all expected keys exist with at least empty lists
+                for key in ['franchises', 'ibp_level_5s', 'ibp_level_6s', 'catalog_numbers', 
+                           'regions', 'countries', 'states', 'cities', 'locations']:
+                    if key not in options:
+                        options[key] = []
+                
+                # Update cache
+                self._filter_options_cache = options
+                self._last_refresh_time = current_time
+                
+                logger.info(f"Successfully refreshed filter options. Found {sum(len(v) for v in options.values())} total options")
+                return options
+                
+            except Exception as e:
+                error_msg = f"Error getting filter options: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                
+                # Return cached data if available, even if stale
+                if self._filter_options_cache:
+                    logger.warning("Using cached filter options due to error")
+                    return self._filter_options_cache
+                
+                # If no cached data, return empty options
+                logger.warning("No cached filter options available, returning empty options")
+                return {
+                    'franchises': [],
+                    'ibp_level_5s': [],
+                    'ibp_level_6s': [],
+                    'catalog_numbers': [],
+                    'regions': [],
+                    'countries': [],
+                    'states': [],
+                    'cities': [],
+                    'locations': []
+                }
 
     def close_user_session(self, user_id: str):
         """Close the database session for a specific user"""

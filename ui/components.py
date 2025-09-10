@@ -54,9 +54,9 @@ class AuthHeader:
         """Create navigation links for all pages."""
         pages = [
             ('/', 'Dashboard'),
-            ('/raw_data', 'Raw Data'),
-            ('/llms', 'LLMs'),
-            ('/agent', 'Agent')
+            #('/raw_data', 'Raw Data'),
+            #('/llms', 'LLMs'),
+            #('/agent', 'Agent')
         ]
         
         with ui.row().classes('items-center gap-1'):
@@ -110,10 +110,32 @@ class FilterComponents:
     def __init__(self, filter_state: Dict[str, Any], on_filter_change: Callable):
         self.filter_state = filter_state
         self.on_filter_change = on_filter_change
-        # Get filter options from the global state
-        from core.state_manager import get_global_state
-        state = get_global_state()
-        self.options = state.get_filter_options()
+        
+        # Initialize default options structure
+        self.options = {
+            'products': ["Franchise", "IBP Level 5", "IBP Level 6", "CatalogNumber"],
+            'locations': ['Area', 'Region', 'Country'],
+            'levels': ["Franchise", "IBP Level 5", "IBP Level 6", "CatalogNumber"],
+            'products_filt': [],
+            'locations_filt': []
+        }
+        
+        # Try to get filter options from the global state
+        try:
+            from core.state_manager import get_global_state
+            state = get_global_state()
+            if state:
+                options = state.get_filter_options()
+                if options:
+                    self.options.update(options)
+                else:
+                    print("Warning: No filter options returned from state")
+            else:
+                print("Warning: Could not get global state")
+        except Exception as e:
+            print(f"Error getting filter options: {e}")
+            
+        print(f"Initialized FilterComponents with options: {list(self.options.keys())}")
     
     def create_filter_row(self):
         """Create the main filter row with all filter components."""
@@ -124,63 +146,150 @@ class FilterComponents:
     
     def _create_location_selects(self):
         """Create location filter dropdowns."""
+        # Set default value from filter_state or use 'Region' as fallback
+        default_location = self.filter_state.get('location1', 'Region')
+        
         location_select1 = ui.select(
             label='Location',
-            options=self.options['locations'],
+            options=self.options.get('locations', []),
             with_input=False,
-            value='Region',
+            value=default_location,
             on_change=lambda e: self.on_filter_change('location1', e.value)
-        ).classes('w-40') #.bind_value(self.filter_state, 'location1')
+        ).classes('w-40')
+        
+        # Set the second dropdown label based on the selected location type
+        location2_label = default_location if default_location in ['Area', 'Region', 'Country'] else 'Region'
         
         self.location_select2 = ui.select(
-            label='Region',
-            options=self.options['locations_filt'],
+            label=location2_label,
+            options=self.options.get('locations_filt', []),
             with_input=True,
-            on_change=lambda e: self.on_filter_change('location2', e.value)
-        ).classes('w-40')  #.bind_value(self.filter_state, 'location2')
+            on_change=lambda e: self.on_filter_change('location2', e.value),
+            clearable=True
+        ).classes('w-40')
+        
+        # Store references to the select elements
+        self.location_select1 = location_select1
+        
+        # If we have a value in filter_state, ensure it's selected
+        if 'location2' in self.filter_state and self.filter_state['location2']:
+            self.location_select2.value = self.filter_state['location2']
         
         return location_select1, self.location_select2
     
     def _create_product_selects(self):
         """Create product filter dropdowns."""
+        # Set default value from filter_state or use 'Franchise' as fallback
+        default_product = self.filter_state.get('product1', 'Franchise')
+        
         self.product_select1 = ui.select(
             label='Product',
-            options=self.options['products'],
+            options=self.options.get('products', []),
             with_input=False,
-            value='Franchise',  # Use filter_state value instead of hardcoded
+            value=default_product,
             on_change=lambda e: self.on_filter_change('product1', e.value),
         ).classes('w-40')
         
+        # Set the second dropdown label based on the selected product type
+        product2_label = default_product if default_product in ['Franchise', 'IBP Level 5', 'IBP Level 6', 'CatalogNumber'] else 'Product'
+        
         self.product_select2 = ui.select(
-            label=self.filter_state.get('product1', 'Franchise'),  # Use filter_state value for label
-            options=self.options['products_filt'],
+            label=product2_label,
+            options=self.options.get('products_filt', []),
             with_input=True,
             on_change=lambda e: self.on_filter_change('product2', e.value),
             clearable=True
         ).classes('w-40')
         
+        # If we have a value in filter_state, ensure it's selected
+        if 'product2' in self.filter_state and self.filter_state['product2']:
+            self.product_select2.value = self.filter_state['product2']
+        
         return self.product_select1, self.product_select2
 
     def _create_level_select(self):
         """Create level selection dropdown."""
-        return ui.select(
+        # Get the current level from filter_state or use empty string
+        current_level = self.filter_state.get('level', '')
+        
+        # Create the select component
+        level_select = ui.select(
             label='Level',
-            options=[''] + self.options['levels'],
+            options=[''] + self.options.get('levels', []),
+            value=current_level,
             clearable=True,
             on_change=lambda e: self.on_filter_change('level', e.value)
         ).classes('w-40')
+        
+        # Store a reference to the select component
+        self.level_select = level_select
+        return level_select
 
     def update_location_options(self, options: list):
-        """Update location select options."""
-        if hasattr(self, 'location_select2'):
-            self.location_select2.options = options
-            self.location_select2.update()
+        """Update location select options.
+        
+        Args:
+            options: List of location options to display in the dropdown
+        """
+        if not hasattr(self, 'location_select2'):
+            print("Warning: location_select2 not initialized yet")
+            return
+            
+        if not isinstance(options, (list, tuple)):
+            print(f"Warning: Expected list of options, got {type(options)}")
+            options = []
+            
+        print(f"Updating location options with {len(options)} items")
+        self.location_select2.options = options
+        self.location_select2.update()
+        
+        # Update the options in our local cache
+        self.options['locations_filt'] = options
     
     def update_product_options(self, options: list):
-        """Update product select options."""
-        if hasattr(self, 'product_select2'):
-            self.product_select2.options = options
-            self.product_select2.update()
+        """Update product select options.
+        
+        Args:
+            options: List of product options to display in the dropdown
+        """
+        if not hasattr(self, 'product_select2'):
+            print("Warning: product_select2 not initialized yet")
+            return
+            
+        if not isinstance(options, (list, tuple)):
+            print(f"Warning: Expected list of options, got {type(options)}")
+            options = []
+            
+        print(f"Updating product options with {len(options)} items")
+        self.product_select2.options = options
+        self.product_select2.update()
+        
+        # Update the options in our local cache
+        self.options['products_filt'] = options
+        
+    def update_level_options(self, options: list):
+        """Update level select options.
+        
+        Args:
+            options: List of level options to display in the dropdown
+        """
+        if not hasattr(self, 'level_select'):
+            print("Warning: level_select not initialized yet")
+            return
+            
+        if not isinstance(options, (list, tuple)):
+            print(f"Warning: Expected list of options, got {type(options)}")
+            options = []
+            
+        # Always include an empty option for clearing the selection
+        all_options = [''] + list(options)
+        
+        print(f"Updating level options with {len(all_options)} items")
+        self.level_select.options = all_options
+        self.level_select.update()
+        
+        # Update the options in our local cache
+        self.options['levels'] = options
 
 
 class ChartComponents:
@@ -203,7 +312,7 @@ class ChartComponents:
         with card:
             # Title bar with fixed height
             with ui.row().classes('w-full px-4 py-2 border-b'):
-                ui.label('Sales by Month').classes('text-md font-medium')
+                ui.label('Seasonality').classes('text-md font-medium')
                 ui.separator().props('vertical').classes('mx-2')
                 self.column_chart_title = ui.label().classes('text-sm font-medium')
             
@@ -219,7 +328,7 @@ class ChartComponents:
         with card:
             # Title bar with fixed height
             with ui.row().classes('w-full px-4 py-2 border-b'):
-                ui.label('Forecast Trend').classes('text-md font-medium')
+                ui.label('Trend').classes('text-md font-medium')
                 ui.separator().props('vertical').classes('mx-2')
                 self.line_chart_title = ui.label().classes('text-sm font-medium')
             

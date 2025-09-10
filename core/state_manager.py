@@ -7,24 +7,25 @@ import polars as pl
 from dataclasses import dataclass, field
 from datetime import datetime
 from core.utils import DataUtils, DatabaseUtils, ErrorHandler
+from nicegui import app
 
 
 @dataclass
 class DataState:
     """Centralized state management for application data."""
-    
+
     # Main dataframes
     df: Optional[pl.DataFrame] = None
     full_df: Optional[pl.DataFrame] = None  # Store original full dataset
     filtered_df: Optional[pl.DataFrame] = None
-    
+
     # Filter state
     filtered_products: List[str] = field(default_factory=list)
     filtered_models: List[str] = field(default_factory=list)
-    
+
     # UI state
     by_month: bool = False
-    
+
     # UI state - Loading indicators for different components
     loading_charts: bool = False
     loading_table: bool = False
@@ -382,13 +383,32 @@ class DataState:
         }
 
 
-# Global instance for backward compatibility during transition
-_global_state = DataState()
-
+# Lazy state management using NiceGUI app.storage for proper multi-session support
 def get_global_state() -> DataState:
-    """Get the global state instance."""
-    return _global_state
+    """Get the client-specific state instance using app.storage.client (lazy access)."""
+    # This can only be called within page builder functions, not during import
+    try:
+        # Use client storage for per-browser-tab isolation
+        if 'fcst_state' not in app.storage.client:
+            app.storage.client['fcst_state'] = DataState()
+        return app.storage.client['fcst_state']
+    except RuntimeError:
+        # If called outside of page context, return a temporary global instance
+        # This should only happen during import/initialization
+        global _temp_state
+        if '_temp_state' not in globals():
+            _temp_state = DataState()
+        return _temp_state
 
 def initialize_global_state() -> None:
-    """Initialize the global state."""
-    _global_state.initialize_data()
+    """Initialize the client-specific session state (only works within page context)."""
+    try:
+        if 'fcst_state' not in app.storage.client:
+            app.storage.client['fcst_state'] = DataState()
+        app.storage.client['fcst_state'].initialize_data()
+    except RuntimeError:
+        # If called outside of page context, initialize temp state
+        global _temp_state
+        if '_temp_state' not in globals():
+            _temp_state = DataState()
+        _temp_state.initialize_data()

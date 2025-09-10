@@ -2,34 +2,49 @@ import polars as pl
 from core.state_manager import get_global_state
 from typing import Optional, Dict, Any
 
-# Get the global state instance
-state = get_global_state()
+# Remove early state access - make it lazy
+# state = get_global_state()  # This causes import-time error
 
-# Backward compatibility - expose state properties as module-level variables
+# Backward compatibility - expose state properties as module-level variables via lazy access
 def get_df():
-    return state.df
+    return get_global_state().df
 
 def get_filtered_df():
-    return state.filtered_df
+    return get_global_state().filtered_df
 
 def get_filtered_products():
-    return state.filtered_products
+    return get_global_state().filtered_products
 
 def get_filtered_models():
-    return state.filtered_models
+    return get_global_state().filtered_models
 
 def get_by_month():
-    return state.by_month
+    return get_global_state().by_month
 
-# For backward compatibility, create module-level references
-df = state.df
-filtered_df = state.filtered_df
-filtered_products = state.filtered_products
-filtered_models = state.filtered_models
-by_month = state.by_month
+# For backward compatibility, create module-level references (lazy)
+@property
+def df():
+    return get_global_state().df
+
+@property
+def filtered_df():
+    return get_global_state().filtered_df
+
+@property
+def filtered_products():
+    return get_global_state().filtered_products
+
+@property
+def filtered_models():
+    return get_global_state().filtered_models
+
+@property
+def by_month():
+    return get_global_state().by_month
 
 def initialize_data():
     """Initialize the application data"""
+    state = get_global_state()
     state.initialize_data()
 
 def generate_sample_data(path: str = None) -> pl.DataFrame:
@@ -39,6 +54,7 @@ def generate_sample_data(path: str = None) -> pl.DataFrame:
         return pl.DataFrame()
     else:
         # Legacy mode for backward compatibility
+        state = get_global_state()
         return state.load_sample_data(path)
 
 def get_filter_options(prod: Optional[str] = None, loc: Optional[str] = None) -> Dict[str, Any]:
@@ -91,8 +107,9 @@ def get_chart_data(chart_type: str, filtered_df: pl.DataFrame) -> Optional[Dict[
     if filtered_df is not None:
         print(f"DEBUG: filtered_df has {len(filtered_df)} rows")
         print(f"DEBUG: filtered_df columns: {list(filtered_df.columns) if hasattr(filtered_df, 'columns') else 'No columns attr'}")
-    
+
     # Update state with the provided filtered_df
+    state = get_global_state()
     state.update_filtered_data(filtered_df)
     result = state.get_chart_data(chart_type)
     print(f"DEBUG: get_chart_data returning: {result is not None}")

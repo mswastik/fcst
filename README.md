@@ -63,8 +63,15 @@ A comprehensive forecasting application built with NiceGUI that provides advance
 
 4. **Initialize database** (if migrating from parquet files)
    ```bash
-   python migrate_to_duckdb.py
+   python migrate_to_databricks.py
    ```
+   
+   **Migration Details:**
+   - Converts existing parquet files to Databricks database format
+   - Creates comprehensive database schema with product/location hierarchies
+   - Enables enterprise-grade performance and scalability
+   - Supports concurrent user access and advanced security features
+   - Run only once during initial setup or when updating data sources
 
 ## 🚀 Quick Start
 
@@ -197,7 +204,7 @@ Manages application state including data, filters, and UI state.
 - Functions: `get_global_state()`, `initialize_global_state()`
 
 ### Legacy Database Service (`db_service.py`)
-Original database operations with DuckDB backend (maintained for backward compatibility).
+Original database operations with Databricks backend (maintained for backward compatibility).
 
 **Key Features:**
 - CRUD operations for sales data
@@ -306,9 +313,20 @@ class ModelValidator:
 
 **Solutions:**
 ```python
-# Check database file exists
+# Check Databricks database connection
+from databricks.sql import connect
 import os
-print(os.path.exists('forecasting.duckdb'))
+
+# Verify connection using environment variables
+try:
+    connection = connect(
+        server_hostname=os.getenv('DATABRICKS_HOST'),
+        http_path=os.getenv('DATABRICKS_HTTP_PATH'),
+        access_token=os.getenv('DATABRICKS_TOKEN')
+    )
+    print("Databricks connection successful")
+except Exception as e:
+    print(f"Databricks connection failed: {e}")
 
 # Verify database service
 from db_service import get_database_service
@@ -392,9 +410,10 @@ print(f"Execution time: {time.time() - start_time:.2f}s")
 
 Create a `.env` file:
 ```env
-# Database configuration
-DATABASE_PATH=forecasting.duckdb
-DATABASE_MEMORY_LIMIT=4GB
+# Databricks database configuration
+DATABRICKS_HOST=https://your-workspace.databricks.com
+DATABRICKS_HTTP_PATH=/sql/protocolv1/o/your-organization-id/your-cluster-id
+DATABRICKS_TOKEN=your-personal-access-token
 
 # Application settings
 HOST=0.0.0.0
@@ -466,10 +485,11 @@ python main.py
 
 ### Performance Optimization
 
-- **Database**: Use appropriate indexes and query optimization
-- **Memory**: Configure DuckDB memory limits based on available RAM
-- **Caching**: Implement caching for frequently accessed data
+- **Database**: Leverage Databricks SQL warehouses and optimized query execution
+- **Memory**: Configure appropriate Databricks cluster sizes based on workload
+- **Caching**: Implement caching for frequently accessed data in Databricks
 - **Load Balancing**: Use reverse proxy (nginx) for production deployments
+- **Query Optimization**: Utilize Databricks SQL analytics capabilities for complex queries
 
 ## 📊 Model Validation
 
@@ -535,4 +555,4 @@ For support and questions:
 ---
 
 **Last Updated**: September 2025  
-**Version**: 2.1.0
+**Version**: 2.2.0

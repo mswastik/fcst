@@ -1,6 +1,6 @@
 # Database Service API Documentation
 
-The `db_service.py` module provides a comprehensive database abstraction layer for DuckDB operations, handling all data persistence and retrieval for the FCST application.
+The `db_service.py` module provides a comprehensive database abstraction layer for Databricks operations, handling all data persistence and retrieval for the FCST application.
 
 ## Classes
 
@@ -10,18 +10,20 @@ Main database service class that handles all database operations.
 
 ```python
 class DatabaseService:
-    """Database service for DuckDB operations."""
+    """Database service for Databricks operations."""
 ```
 
 #### Initialization
 
 ```python
-def __init__(self, db_path: str = "forecasting.duckdb"):
-    """Initialize database service with connection."""
+def __init__(self, host: str = None, http_path: str = None, token: str = None):
+    """Initialize database service with Databricks connection."""
 ```
 
 **Parameters:**
-- `db_path` (str): Path to DuckDB database file
+- `host` (str, optional): Databricks workspace host URL
+- `http_path` (str, optional): Databricks SQL warehouse HTTP path  
+- `token` (str, optional): Databricks personal access token
 
 #### Core Methods
 
@@ -203,11 +205,11 @@ except Exception as e:
 
 ##### `migrate_from_parquet(parquet_path: str) -> None`
 
-Migrates data from parquet files to DuckDB.
+Migrates data from parquet files to Databricks database.
 
 ```python
 def migrate_from_parquet(self, parquet_path: str) -> None:
-    """Migrate data from parquet files to DuckDB."""
+    """Migrate data from parquet files to Databricks database."""
 ```
 
 **Parameters:**
@@ -348,9 +350,9 @@ Model validation results and metrics.
 
 ### Memory Management
 ```python
-# Configure DuckDB memory settings
-db.connection.execute("SET memory_limit='4GB'")
-db.connection.execute("SET threads=4")
+# Configure Databricks cluster settings for optimal performance
+# Set appropriate cluster size and auto-scaling based on workload
+# Use Databricks SQL warehouses for query optimization
 ```
 
 ### Connection Pooling
@@ -382,11 +384,11 @@ except QueryExecutionError as e:
 
 ## Migration Guide
 
-### From Parquet to DuckDB
-1. Run migration script: `python migrate_to_duckdb.py`
-2. Verify data integrity
-3. Update application configuration
-4. Test all functionality
+### From Parquet to Databricks
+1. Run migration script: `python migrate_to_databricks.py`
+2. Verify data integrity in Databricks workspace
+3. Update application configuration with Databricks credentials
+4. Test all functionality with Databricks backend
 
 ### Schema Updates
 1. Create migration scripts for schema changes

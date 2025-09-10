@@ -70,7 +70,7 @@ class EnhancedDatabaseService:
             logger.error(f"Failed to create session for user {user_id}: {e}")
             raise
 
-    def execute_query(self, query: str, params: tuple = None, user_id: str = None) -> pl.DataFrame:
+    def execute_query(self, query: str, params: Optional[tuple] = None, user_id: Optional[str] = None) -> pl.DataFrame:
         """Execute a query for a specific user and return Polars DataFrame using Arrow format"""
         if not user_id:
             raise ValueError("user_id is required for multi-user operation")
@@ -113,7 +113,7 @@ class EnhancedDatabaseService:
             logger.error(f"Query execution failed for user {user_id}: {e}")
             raise
 
-    def execute_query_raw(self, query: str, params: tuple = None, user_id: str = None):
+    def execute_query_raw(self, query: str, params: Optional[tuple] = None, user_id: Optional[str] = None):
         """Execute a query and return raw cursor results"""
         if not user_id:
             raise ValueError("user_id is required for multi-user operation")
@@ -126,7 +126,7 @@ class EnhancedDatabaseService:
             cursor.execute(query)
         return cursor
 
-    def get_sales_actuals(self, filters: Dict = None, limit: int = None, user_id: str = None) -> pl.DataFrame:
+    def get_sales_actuals(self, filters: Optional[Dict] = None, limit: Optional[int] = None, user_id: Optional[str] = None) -> pl.DataFrame:
         """Get sales actuals data for a specific user"""
         if not user_id:
             user_id = "system"
@@ -163,7 +163,7 @@ class EnhancedDatabaseService:
 
         return self.execute_query(query, tuple(params) if params else None, user_id)
 
-    def estimate_filtered_data_size(self, location_col: str = None, location_val: str = None, product_col: str = None, product_val: str = None, user_id: str = None) -> int:
+    def estimate_filtered_data_size(self, location_col: Optional[str] = None, location_val: Optional[str] = None, product_col: Optional[str] = None, product_val: Optional[str] = None, user_id: Optional[str] = None) -> int:
         """Estimate the number of rows that would be returned with given filters"""
         if not user_id:
             user_id = "system"
@@ -213,7 +213,7 @@ class EnhancedDatabaseService:
         result = self.execute_query(count_query, tuple(params) if params else None, user_id)
         return result['count'][0] if len(result) > 0 and 'count' in result.columns else 0
 
-    def get_filtered_sales_actuals(self, location_col: str = None, location_val: str = None, product_col: str = None, product_val: str = None, user_id: str = None) -> pl.DataFrame:
+    def get_filtered_sales_actuals(self, location_col: Optional[str] = None, location_val: Optional[str] = None, product_col: Optional[str] = None, product_val: Optional[str] = None, user_id: Optional[str] = None) -> pl.DataFrame:
         """Get filtered sales actuals data for a specific user"""
         if not user_id:
             user_id = "system"
@@ -449,11 +449,187 @@ class EnhancedDatabaseService:
                     'locations': []
                 }
 
+    def _get_skeys_for_unique_id(self, unique_id: str, user_id: str) -> Tuple[Optional[int], Optional[int]]:
+        """Helper to get item_skey and location_skey from unique_id (Country,CatalogNumber)"""
+        logger.debug(f"Getting skeys for unique_id: {unique_id}")
+        try:
+            country, catalog_number = unique_id.split(',', 1)
+            logger.debug(f"Parsed country: {country}, catalog_number: {catalog_number}")
+        except ValueError:
+            logger.warning(f"Invalid unique_id format: {unique_id}. Expected 'Country,CatalogNumber'")
+            return None, None
+
+        # Query product_hierarchy for item_skey
+        logger.debug(f"Querying product_hierarchy for catalog_number: {catalog_number}")
+        product_query = "SELECT demantra_item_skey FROM da.product_hierarchy WHERE catalog_number = ?"
+        product_result = self.execute_query(product_query, (catalog_number,), user_id)
+        item_skey = product_result['demantra_item_skey'] if not product_result.is_empty() else None
+        logger.debug(f"Product query result - item_skey: {item_skey}")
+
+        # Query location_hierarchy for location_skey
+        logger.debug(f"Querying location_hierarchy for country: {country}")
+        location_query = "SELECT location_skey FROM da.location_hierarchy WHERE country = ?"
+        location_result = self.execute_query(location_query, (country,), user_id)
+        location_skey = location_result['location_skey'] if not location_result.is_empty() else None
+        logger.debug(f"Location query result - location_skey: {location_skey}")
+
+        return item_skey, location_skey
+
+    def insert_forecasts(self, forecast_df: pl.DataFrame, model_type: str, user_id: str = None) -> int:
+        """
+        Inserts forecast data into the da.forecasts table.
+        Assumes forecast_df has 'unique_id', 'SALES_DATE' (or 'ds'), and forecast columns (e.g., 'Fcst Ensemble Rev').
+        """
+        if not user_id:
+            user_id = "system" # Default to system user if not provided
+
+        logger.info(f"Starting forecast insertion for {len(forecast_df)} records, user: {user_id}")
+
+        if forecast_df.is_empty():
+            logger.warning("No forecast data to insert.")
+            return 0
+
+        # Auto-create connection if it doesn't exist
+        try:
+            conn = self.connection_manager.get_user_connection(user_id)
+            logger.info("Database connection established")
+        except ValueError:
+            # Connection doesn't exist, create it
+            logger.info(f"Creating new database connection for user: {user_id}")
+            self.connection_manager.create_user_connection(user_id)
+            conn = self.connection_manager.get_user_connection(user_id)
+            logger.info("New database connection created")
+
+        # Ensure SALES_DATE is present and correctly typed
+        if 'ds' in forecast_df.columns:
+            forecast_df = forecast_df.rename({'ds': 'SALES_DATE'})
+            
+        if 'SALES_DATE' not in forecast_df.columns:
+            raise ValueError("Forecast DataFrame must contain a 'SALES_DATE' column.")
+        
+        # Ensure SALES_DATE is datetime
+        forecast_df = forecast_df.with_columns(pl.col('SALES_DATE').cast(pl.Datetime))
+        logger.info("DataFrame prepared for insertion")
+
+        # Prepare data for insertion
+        logger.info("Starting data preparation for insertion...")
+        records_to_insert = []
+        skipped_count = 0
+        total_records = len(forecast_df)
+        logger.info(f"Processing {total_records} forecast records")
+        
+        for i, row in enumerate(forecast_df.iter_rows(named=True)):
+            if i % 10 == 0:  # Log progress every 10 records
+                logger.info(f"Processing record {i+1}/{total_records}")
+            
+            unique_id = row.get('unique_id')
+            if not unique_id:
+                logger.warning(f"Skipping row due to missing unique_id: {row}")
+                skipped_count += 1
+                continue
+
+            logger.debug(f"Getting skeys for unique_id: {unique_id}")
+            item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
+
+            if item_skey is None or location_skey is None:
+                logger.warning(f"Could not find s_keys for unique_id: {unique_id}. Item_skey: {item_skey}, Location_skey: {location_skey}. Skipping row.")
+                skipped_count += 1
+                continue
+
+            # Extract forecast value - assuming 'Fcst Ensemble Rev' or 'ensemble' or similar
+            forecast_value = (row.get('Fcst Ensemble Rev', 0.0) or 
+                            row.get('ensemble', 0.0) or 
+                            row.get('NHITS', 0.0)) # Fallback to NHITS if ensemble not present
+            
+            # Determine forecast horizon (months ahead from last actual date)
+            # This is a simplification; a more robust solution would compare to the last actual sales date
+            forecast_date = row['SALES_DATE']
+            
+            # Placeholder for horizon - assuming 1 for now, needs actual calculation
+            # For simplicity, let's assume horizon is 1 for all forecasts for now
+            # A more accurate horizon would require knowing the last actual sales date
+            forecast_horizon = 1
+            
+            # Generate a unique forecast_id
+            forecast_id = uuid.uuid4().int & (1<<63)-1 # Generate a 63-bit integer UUID
+
+            records_to_insert.append({
+                'forecast_id': forecast_id,
+                'item_skey': item_skey,
+                'location_skey': location_skey,
+                'forecast_date': forecast_date.strftime('%Y-%m-%d'), # Format date for SQL
+                'forecast_horizon': forecast_horizon,
+                'model_type': model_type,
+                'forecast_value': forecast_value,
+                'confidence_lower': row.get('confidence_lower'), # Assuming these exist if provided
+                'confidence_upper': row.get('confidence_upper'),
+                'model_version': row.get('model_version', '1.0')
+            })
+        
+        if not records_to_insert:
+            logger.warning(f"No valid records to insert after processing. Skipped {skipped_count} records.")
+            return 0
+
+        logger.info(f"Prepared {len(records_to_insert)} records for insertion")
+
+        # Convert to Polars DataFrame for batch insertion
+        insert_df = pl.DataFrame(records_to_insert)
+        logger.info(f"Converted to insert DataFrame with {len(insert_df)} rows")
+
+        # Construct INSERT statement
+        columns = ", ".join(insert_df.columns)
+        placeholders = ", ".join(["?" for _ in insert_df.columns])
+        insert_query = f"INSERT INTO da.forecasts ({columns}) VALUES ({placeholders})"
+        logger.info(f"Insert query prepared: {insert_query}")
+
+        cursor = conn.cursor()
+        logger.info("Database cursor created")
+        
+        inserted_count = 0
+        try:
+            logger.info("Starting batch insertion...")
+            # Execute in batches
+            for i, row_data in enumerate(insert_df.iter_rows()):
+                if i % 10 == 0:  # Log progress every 10 inserts
+                    logger.info(f"Inserting record {i+1}/{len(insert_df)}")
+                
+                # Convert Polars Series values to Python types for Databricks compatibility
+                python_row_data = []
+                for value in row_data:
+                    if hasattr(value, 'item') and len(value) == 1:  # Polars Series with single element
+                        python_row_data.append(value.item())
+                    elif hasattr(value, 'to_list') and len(value) > 1:  # Polars Series with multiple elements
+                        # For Series with multiple elements, take the first value
+                        python_row_data.append(value[0])
+                    elif hasattr(value, 'item'):  # Other Polars objects
+                        try:
+                            python_row_data.append(value.item())
+                        except ValueError:
+                            # If .item() fails, try to get the first element
+                            python_row_data.append(value[0] if len(value) > 0 else None)
+                    else:
+                        python_row_data.append(value)
+                
+                cursor.execute(insert_query, tuple(python_row_data))
+                inserted_count += 1
+            
+            logger.info(f"Successfully inserted {inserted_count} forecast records into da.forecasts. Skipped {skipped_count} records.")
+        except Exception as e:
+            logger.error(f"Failed to insert forecasts: {e}", exc_info=True)
+            raise
+        finally:
+            logger.info("Closing database cursor")
+            cursor.close()
+
+        return inserted_count
+
     def close_user_session(self, user_id: str):
         """Close the database session for a specific user"""
         self.connection_manager.close_user_connection(user_id)
         logger.info(f"Closed database session for user: {user_id}")
-        """Get statistics about current connections"""
+        # This line was causing a Pylance error, it seems to be a misplaced docstring or comment
+        # """Get statistics about current connections"""
+        # The actual return is handled by the next line
         return self.connection_manager.get_connection_stats()
 
     def cleanup_old_sessions(self, max_age_seconds: int = 3600):

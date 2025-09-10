@@ -372,10 +372,24 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                     
                     # Save forecasts to database
                     print("Attempting to save forecasts to database...")
+                    print(f"Forecast DataFrame shape: {forecast_df.shape}")
+                    print(f"Forecast DataFrame columns: {forecast_df.columns}")
+                    if len(forecast_df) > 0:
+                        print(f"Sample forecast data: {forecast_df.head(3)}")
+                        print(f"Forecast data types: {forecast_df.dtypes}")
+                    
                     db_service = DatabaseUtils.get_database_service()
                     if db_service:
-                        saved_count = db_service.insert_forecasts(forecast_df, model_type="Ensemble")
-                        print(f"Successfully saved {saved_count} forecast records to database")
+                        try:
+                            saved_count = db_service.insert_forecasts(forecast_df, model_type="Ensemble")
+                            print(f"Successfully saved {saved_count} forecast records to database")
+                        except Exception as save_error:
+                            print(f"Error saving forecasts to database: {save_error}")
+                            print("Continuing with merged data without saving forecasts")
+                            saved_count = 0
+                    else:
+                        print("Database service not available, skipping forecast save")
+                        saved_count = 0
                     
                     validation_results = {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0, 'forecasts_generated': len(forecast_df), 'forecasts_saved': saved_count}
                     print(f"Models created successfully. Validation results: {validation_results}")
@@ -388,16 +402,27 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
         else:
             print("EnsembleForecaster not available, returning clustered data")
         
-        # Return as JSON strings - handle potential long filename issues
+        # Return as JSON strings - use IPC format to avoid path length issues
         try:
-            merged_df_json = merged_df.write_json() if merged_df is not None else None
-        except Exception as json_error:
-            print(f"Error serializing to JSON: {json_error}")
-            # Try with a more compact JSON format to avoid path length issues
+            # Use IPC format instead of JSON to avoid Windows path length limitations
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ipc') as tmp_file:
+                merged_df.write_ipc(tmp_file.name) if merged_df is not None else None
+                merged_df_json = tmp_file.name
+        except Exception as ipc_error:
+            print(f"Error serializing to IPC: {ipc_error}")
+            # Fallback to JSON with row limit to avoid path issues
             try:
-                merged_df_json = merged_df.write_json(pretty=False) if merged_df is not None else None
-            except Exception as compact_error:
-                print(f"Error with compact JSON: {compact_error}")
+                if merged_df is not None and len(merged_df) > 1000:
+                    # Limit rows to avoid path length issues
+                    merged_df_limited = merged_df.head(1000)
+                    merged_df_json = merged_df_limited.write_json(pretty=False)
+                    print(f"Limited DataFrame to {len(merged_df_limited)} rows to avoid path length issues")
+                else:
+                    merged_df_json = merged_df.write_json(pretty=False) if merged_df is not None else None
+            except Exception as json_error:
+                print(f"Error serializing to JSON: {json_error}")
                 merged_df_json = None
 
         return merged_df_json, validation_results
@@ -453,15 +478,26 @@ def run_enhanced_forecasting_pipeline(df: pl.DataFrame, file_path: str, state: D
         else:
             merged_df_json, validation_results = result
 
-        # Reconstruct dataframe from JSON
+        # Reconstruct dataframe from JSON/IPC
         if merged_df_json is not None:
             try:
-                merged_df = pl.read_json(merged_df_json)
+                # Check if it's an IPC file (temporary file) or JSON string
+                if isinstance(merged_df_json, str) and merged_df_json.endswith('.ipc'):
+                    # Read from IPC file
+                    merged_df = pl.read_ipc(merged_df_json)
+                    # Clean up temporary file
+                    try:
+                        os.unlink(merged_df_json)
+                    except:
+                        pass  # Ignore cleanup errors
+                else:
+                    # Read from JSON string
+                    merged_df = pl.read_json(merged_df_json)
                 # Update state if provided
                 if state is not None:
                     state.df = merged_df
             except Exception as json_read_error:
-                print(f"Error reading JSON result: {json_read_error}")
+                print(f"Error reading result data: {json_read_error}")
                 merged_df = None
         else:
             merged_df = None
@@ -660,7 +696,14 @@ def create_models_action(df: pl.DataFrame, file_path: str, state: DataState = No
     
     try:
         # Run the enhanced pipeline
-        merged_df, validation_results = run_enhanced_forecasting_pipeline(df, file_path, state)
+        result = run_enhanced_forecasting_pipeline(df, file_path, state)
+        
+        # Ensure we have a proper tuple return
+        if result is None or not isinstance(result, tuple) or len(result) != 2:
+            print(f"Invalid return from run_enhanced_forecasting_pipeline: {result}")
+            merged_df, validation_results = None, {'error': 'Invalid pipeline return'}
+        else:
+            merged_df, validation_results = result
         
         # Update state
         if merged_df is not None:

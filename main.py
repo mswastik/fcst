@@ -2,11 +2,11 @@
 FCST Application Main Entry Point
 Enhanced with Database Connection Pooling and Session Management
 """
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 import os
 
 # Load environment variables from .env file
-load_dotenv()
+#load_dotenv()
 
 from nicegui import ui, run #, app
 from core.state_manager import initialize_global_state
@@ -112,7 +112,7 @@ def main():
                 ui.notify(f'Authentication error: {str(e)}', type='negative')
                 return {"error": str(e)}
     '''
-    ui.run(reload=False,title="ML Integration",reconnect_timeout=7000, storage_secret='my_secret_key', host="0.0.0.0", port=8000)
+    ui.run(reload=True,title="ML Integration",reconnect_timeout=7000, storage_secret='my_secret_key', host="0.0.0.0", port=8000)
 
 if __name__ in {"__main__", "__mp_main__"}:
     main()

@@ -254,6 +254,8 @@ class EnhancedDatabaseService:
         # Query with filters applied at database level - optimized for performance
         query = f"""
         SELECT
+            sa.item_skey,
+            sa.location_skey,
             sa.sales_date,
             sa.act_orders_rev,
             sa.fcst_stat_prelim_rev,

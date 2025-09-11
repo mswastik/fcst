@@ -119,6 +119,31 @@ CREATE TABLE IF NOT EXISTS da.model_validation (
 -- Enable column defaults for this table
 ALTER TABLE da.model_validation SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
 
+-- Final Forecasts Table (for approved forecasts only)
+CREATE TABLE IF NOT EXISTS da.final_forecasts (
+    final_forecast_id BIGINT,
+    -- Original forecast data
+    forecast_id BIGINT, -- Reference to original forecast (can be NULL)
+    item_skey BIGINT NOT NULL,
+    location_skey BIGINT NOT NULL,
+    forecast_date DATE NOT NULL,
+    forecast_horizon INTEGER NOT NULL,
+    forecast_value DECIMAL(15,2) NOT NULL,
+    -- Final forecast metadata
+    forecast_cycle_month DATE NOT NULL, -- Month when forecast was generated
+    model_type VARCHAR(50) NOT NULL, -- Final model used ('Ensemble', 'NHITS', etc.)
+    model_version VARCHAR(50),
+    -- Approval and lifecycle
+    approved_by VARCHAR(100) NOT NULL,
+    is_current BOOLEAN DEFAULT TRUE, -- Flag for active forecasts
+    -- Audit fields
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Enable column defaults for this table
+ALTER TABLE da.final_forecasts SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
+
 -- Indexes for Performance
 CREATE INDEX idx_sales_actuals_date ON da.sales_actuals(sales_date);
 CREATE INDEX idx_sales_actuals_item_location ON da.sales_actuals(item_skey, location_skey);
@@ -143,6 +168,7 @@ CREATE UNIQUE INDEX idx_sales_actuals_pk ON da.sales_actuals(id);
 CREATE UNIQUE INDEX idx_product_clusters_pk ON da.product_clusters(cluster_id);
 CREATE UNIQUE INDEX idx_forecasts_pk ON da.forecasts(forecast_id);
 CREATE UNIQUE INDEX idx_model_validation_pk ON da.model_validation(validation_id);
+CREATE UNIQUE INDEX idx_final_forecasts_pk ON da.final_forecasts(final_forecast_id);
 
 -- Relationship indexes to maintain referential integrity
 CREATE INDEX idx_sales_actuals_item_fk ON da.sales_actuals(item_skey);
@@ -151,6 +177,8 @@ CREATE INDEX idx_product_clusters_item_fk ON da.product_clusters(item_skey);
 CREATE INDEX idx_product_clusters_location_fk ON da.product_clusters(location_skey);
 CREATE INDEX idx_forecasts_item_fk ON da.forecasts(item_skey);
 CREATE INDEX idx_forecasts_location_fk ON da.forecasts(location_skey);
+CREATE INDEX idx_final_forecasts_item_fk ON da.final_forecasts(item_skey);
+CREATE INDEX idx_final_forecasts_location_fk ON da.final_forecasts(location_skey);
 
 -- Unique index to replace UNIQUE constraint
 CREATE UNIQUE INDEX idx_product_clusters_unique ON da.product_clusters(item_skey, location_skey);

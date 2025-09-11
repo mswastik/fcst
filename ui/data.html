@@ -50,6 +50,8 @@
                     <button class="tab" onclick="switchTab('table')">Table View</button>
                     <button class="tab active" onclick="switchTab('chart')">Charts</button>
                     <button class="tab" onclick="switchTab('metrics')">Key Metrics</button>
+                    <button class="tab" onclick="switchTab('forecast')">Forecasts</button>
+                    <button class="tab" onclick="switchTab('validation')">Model Validation</button>
                     <button class="tab" onclick="switchTab('raw')">Raw Data</button>
                 </div>
 
@@ -90,6 +92,129 @@
                         <div class="empty-state">
                             <h3>No Metrics Available</h3>
                             <p>Generate a pivot table first to see key metrics.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="forecast-view" class="tab-content">
+                    <div class="forecast-controls" style="margin-bottom: 20px;">
+                        <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 15px;">
+                            <div>
+                                <label for="forecast-horizon" style="font-weight: 500;">Forecast Horizon: </label>
+                                <select id="forecast-horizon" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                                    <option value="3">3 Months</option>
+                                    <option value="6">6 Months</option>
+                                    <option value="12">12 Months</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="forecast-cycle" style="font-weight: 500;">Forecast Cycle: </label>
+                                <select id="forecast-cycle" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                                    <option value="latest">Latest</option>
+                                    <option value="previous">Previous Month</option>
+                                    <option value="2months">2 Months Ago</option>
+                                </select>
+                            </div>
+                            <button class="btn" onclick="loadForecastData()" style="background-color: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px;">Load Forecasts</button>
+                            <button class="btn secondary" onclick="exportForecastData()">Export Forecasts</button>
+                        </div>
+                    </div>
+
+                    <div class="forecast-content">
+                        <div id="forecast-summary" class="forecast-summary" style="margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
+                            <h4 style="margin: 0 0 10px 0;">Forecast Summary</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+                                <div><strong>Total Forecasts:</strong> <span id="total-forecasts">-</span></div>
+                                <div><strong>Approved:</strong> <span id="approved-forecasts">-</span></div>
+                                <div><strong>Current Cycle:</strong> <span id="current-cycle">-</span></div>
+                                <div><strong>Avg Forecast Value:</strong> <span id="avg-forecast-value">-</span></div>
+                            </div>
+                        </div>
+
+                        <div id="forecast-table-container" style="overflow-x: auto;">
+                            <table id="forecast-table" style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background-color: #f8f9fa;">
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Item</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Location</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Forecast Date</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Horizon</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Model</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Forecast Value</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Lower Bound</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Upper Bound</th>
+                                        <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="forecast-table-body">
+                                    <tr>
+                                        <td colspan="9" style="text-align: center; padding: 40px; color: #666;">
+                                            Click "Load Forecasts" to display forecast data
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="validation-view" class="tab-content">
+                    <div class="validation-controls" style="margin-bottom: 20px;">
+                        <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 15px;">
+                            <div>
+                                <label for="validation-period" style="font-weight: 500;">Validation Period: </label>
+                                <select id="validation-period" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                                    <option value="3">Last 3 Months</option>
+                                    <option value="6">Last 6 Months</option>
+                                    <option value="12">Last 12 Months</option>
+                                </select>
+                            </div>
+                            <button class="btn" onclick="runModelValidation()" style="background-color: #28a745; color: white; border: none; padding: 6px 12px; border-radius: 4px;">Run Validation</button>
+                            <button class="btn secondary" onclick="exportValidationReport()">Export Report</button>
+                        </div>
+                    </div>
+
+                    <div class="validation-content">
+                        <div id="validation-summary" class="validation-summary" style="margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
+                            <h4 style="margin: 0 0 10px 0;">Model Performance Summary</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+                                <div><strong>Best Model:</strong> <span id="best-model">-</span></div>
+                                <div><strong>Avg MAPE:</strong> <span id="avg-mape">-</span></div>
+                                <div><strong>Avg RMSE:</strong> <span id="avg-rmse">-</span></div>
+                                <div><strong>Accuracy %:</strong> <span id="overall-accuracy">-</span></div>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div id="validation-table-container" style="overflow-x: auto;">
+                                <h4>Model Performance Metrics</h4>
+                                <table id="validation-table" style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background-color: #f8f9fa;">
+                                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Model</th>
+                                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Period</th>
+                                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">MAE</th>
+                                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">MAPE</th>
+                                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">RMSE</th>
+                                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Accuracy %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="validation-table-body">
+                                        <tr>
+                                            <td colspan="6" style="text-align: center; padding: 40px; color: #666;">
+                                                Click "Run Validation" to analyze model performance
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div id="validation-chart-container">
+                                <h4>Model Comparison Chart</h4>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="validationChart" width="400" height="300"></canvas>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -474,7 +599,7 @@ function toggleSidebar(sidebarId) {
     function populateFilterFields() {
         const filterFieldSelect = document.getElementById('filter-field');
         filterFieldSelect.innerHTML = '<option value="">Select Field</option>';
-        const allowedFields = ['StrykerGroupRegion', 'Area', 'Region', 'Country', 'Business Sector', 'Business Unit', 'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7','CatalogNumber','birch','cluster'];
+        const allowedFields = ['StrykerGroupRegion', 'Area', 'Region', 'Country', 'Business Sector', 'Business Unit', 'Franchise', 'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7','CatalogNumber','birch','cluster', 'forecast_date', 'forecast_horizon', 'model_type', 'data_type'];
         
         allowedFields.forEach(field => {
             const option = document.createElement('option');
@@ -1581,8 +1706,8 @@ function toggleSidebar(sidebarId) {
                     rowOption.selected = true;
                 }
 
-                // Select default value fields
-                const defaultValueFields = ['Act Orders Rev', 'NHITS', 'Fcst Stat Final Rev'];
+                // Select default value fields (include forecast values)
+                const defaultValueFields = ['Act Orders Rev', 'NHITS', 'Fcst Stat Final Rev', 'forecast_value'];
                 defaultValueFields.forEach(field => {
                     const valueOption = Array.from(valueFieldsSelect.options).find(opt => opt.value === field);
                     if (valueOption) {
@@ -1603,6 +1728,319 @@ function toggleSidebar(sidebarId) {
 
         // Expose the function globally for external calls (e.g., from parent window or other scripts)
         //window.loadPivotData = loadDataProgrammatically;
+        
+        // Forecast functionality
+        function loadForecastData() {
+            const horizon = document.getElementById('forecast-horizon').value;
+            const cycle = document.getElementById('forecast-cycle').value;
+
+            // Show loading state
+            const tableBody = document.getElementById('forecast-table-body');
+            tableBody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px;"><div>Loading forecast data...</div></td></tr>';
+
+            // Filter forecast data from the loaded dataset
+            setTimeout(() => {
+                let forecastData = [];
+
+                if (currentData && currentData.length > 0) {
+                    // Filter for forecast data type
+                    forecastData = currentData.filter(item => item.data_type === 'forecast');
+
+                    // Apply horizon and cycle filters if needed
+                    if (horizon !== '3') {
+                        forecastData = forecastData.filter(item => item.forecast_horizon == horizon);
+                    }
+
+                    if (cycle !== 'latest') {
+                        // Filter by cycle logic - you can customize this based on your cycle requirements
+                        forecastData = forecastData.filter(item => {
+                            // Example: filter by forecast_date for cycle selection
+                            const forecastMonth = new Date(item.forecast_date).getMonth() + 1;
+                            const currentMonth = new Date().getMonth() + 1;
+
+                            if (cycle === 'previous') {
+                                return forecastMonth === (currentMonth - 1) || (currentMonth === 1 ? forecastMonth === 12 : false);
+                            } else if (cycle === '2months') {
+                                return forecastMonth === (currentMonth - 2) || (currentMonth <= 2 ? forecastMonth === (12 + currentMonth - 2) : false);
+                            }
+                            return true;
+                        });
+                    }
+                }
+
+                updateForecastTable(forecastData);
+                updateForecastSummary(forecastData);
+                
+                // Update currentData with forecast data
+                currentData = currentData || [];
+                currentData = [...currentData, ...forecastData];
+                
+                // Refresh pivot table and charts
+                if (currentData.length > 0) {
+                    currentPivotData = createPivotTable(
+                        currentData,
+                        getFieldsFromZone('rows'),
+                        getFieldsFromZone('columns'),
+                        getFieldsFromZone('values')
+                    );
+                    
+                    // Update chart if chart tab is active
+                    if (document.getElementById('chart-view').classList.contains('active')) {
+                        updateChart();
+                    }
+                }
+            }, 500);
+        }
+        
+        function updateForecastTable(data) {
+            const tableBody = document.getElementById('forecast-table-body');
+
+            if (!data || data.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px; color: #666;">No forecast data available</td></tr>';
+                return;
+            }
+
+            let html = '';
+            data.forEach(row => {
+                const status = row.is_current ? '<span style="color: green;">✓ Current</span>' : '<span style="color: orange;">⏳ Pending</span>';
+                html += `
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${row.item_skey || 'N/A'}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${row.location_skey || 'N/A'}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${row.forecast_date || 'N/A'}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${row.forecast_horizon || 'N/A'} months</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${row.model_type || 'N/A'}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatValue(row.forecast_value)}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">N/A</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">N/A</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${status}</td>
+                    </tr>
+                `;
+            });
+
+            tableBody.innerHTML = html;
+        }
+        
+        function updateForecastSummary(data) {
+            if (!data || data.length === 0) {
+                document.getElementById('total-forecasts').textContent = '0';
+                document.getElementById('approved-forecasts').textContent = '0';
+                document.getElementById('current-cycle').textContent = 'N/A';
+                document.getElementById('avg-forecast-value').textContent = '0';
+                return;
+            }
+            
+            const total = data.length;
+            const approved = data.filter(d => d.is_current).length;
+            const avgValue = data.reduce((sum, d) => sum + (d.forecast_value || 0), 0) / data.length;
+            
+            document.getElementById('total-forecasts').textContent = total;
+            document.getElementById('approved-forecasts').textContent = approved;
+            document.getElementById('current-cycle').textContent = new Date().toLocaleDateString();
+            document.getElementById('avg-forecast-value').textContent = formatValue(avgValue);
+        }
+        
+        function exportForecastData() {
+            const table = document.getElementById('forecast-table');
+            if (!table) {
+                alert('No forecast data to export');
+                return;
+            }
+            
+            let csvContent = '';
+            
+            // Get headers
+            const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent);
+            csvContent += headers.join(',') + '\\n';
+            
+            // Get data rows
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const cells = Array.from(row.querySelectorAll('td')).map(td => {
+                    const text = td.textContent.trim();
+                    // Escape quotes and wrap in quotes if contains comma or quote
+                    if (text.includes(',') || text.includes('"')) {
+                        return `"${text.replace(/"/g, '""')}"`;
+                    }
+                    return text;
+                });
+                csvContent += cells.join(',') + '\\n';
+            });
+            
+            // Download CSV
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'forecast_data.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+        
+        // Validation functionality
+        function runModelValidation() {
+            const period = document.getElementById('validation-period').value;
+            
+            // Show loading state
+            const tableBody = document.getElementById('validation-table-body');
+            tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px;"><div>Running model validation...</div></td></tr>';
+            
+            // This would typically make an API call to run validation
+            // For now, we'll simulate with sample data
+            setTimeout(() => {
+                const sampleData = [
+                    {
+                        model_type: 'NHITS',
+                        validation_period: `${period} months`,
+                        mae: 12500,
+                        mape: 8.5,
+                        rmse: 15200,
+                        accuracy_percentage: 91.5
+                    },
+                    {
+                        model_type: 'Ensemble',
+                        validation_period: `${period} months`,
+                        mae: 9800,
+                        mape: 6.2,
+                        rmse: 12400,
+                        accuracy_percentage: 93.8
+                    },
+                    {
+                        model_type: 'Linear Regression',
+                        validation_period: `${period} months`,
+                        mae: 15600,
+                        mape: 12.1,
+                        rmse: 18900,
+                        accuracy_percentage: 87.9
+                    }
+                ];
+                
+                updateValidationTable(sampleData);
+                updateValidationSummary(sampleData);
+                updateValidationChart(sampleData);
+            }, 2000);
+        }
+        
+        function updateValidationTable(data) {
+            const tableBody = document.getElementById('validation-table-body');
+            
+            if (!data || data.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No validation data available</td></tr>';
+                return;
+            }
+            
+            let html = '';
+            data.forEach(row => {
+                html += `
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${row.model_type}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${row.validation_period}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatValue(row.mae)}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${row.mape}%</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatValue(row.rmse)}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${row.accuracy_percentage}%</td>
+                    </tr>
+                `;
+            });
+            
+            tableBody.innerHTML = html;
+        }
+        
+        function updateValidationSummary(data) {
+            if (!data || data.length === 0) {
+                document.getElementById('best-model').textContent = 'N/A';
+                document.getElementById('avg-mape').textContent = '0%';
+                document.getElementById('avg-rmse').textContent = '0';
+                document.getElementById('overall-accuracy').textContent = '0%';
+                return;
+            }
+            
+            const bestModel = data.reduce((best, current) => 
+                current.accuracy_percentage > best.accuracy_percentage ? current : best
+            );
+            
+            const avgMape = data.reduce((sum, d) => sum + d.mape, 0) / data.length;
+            const avgRmse = data.reduce((sum, d) => sum + d.rmse, 0) / data.length;
+            const avgAccuracy = data.reduce((sum, d) => sum + d.accuracy_percentage, 0) / data.length;
+            
+            document.getElementById('best-model').textContent = bestModel.model_type;
+            document.getElementById('avg-mape').textContent = `${avgMape.toFixed(1)}%`;
+            document.getElementById('avg-rmse').textContent = formatValue(avgRmse);
+            document.getElementById('overall-accuracy').textContent = `${avgAccuracy.toFixed(1)}%`;
+        }
+        
+        function updateValidationChart(data) {
+            const ctx = document.getElementById('validationChart').getContext('2d');
+            
+            const labels = data.map(d => d.model_type);
+            const accuracyData = data.map(d => d.accuracy_percentage);
+            const mapeData = data.map(d => d.mape);
+            
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Accuracy %',
+                        data: accuracyData,
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: 'MAPE %',
+                        data: mapeData,
+                        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        function exportValidationReport() {
+            const table = document.getElementById('validation-table');
+            if (!table) {
+                alert('No validation data to export');
+                return;
+            }
+            
+            let csvContent = '';
+            
+            // Get headers
+            const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent);
+            csvContent += headers.join(',') + '\\n';
+            
+            // Get data rows
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const cells = Array.from(row.querySelectorAll('td')).map(td => {
+                    const text = td.textContent.trim();
+                    if (text.includes(',') || text.includes('"')) {
+                        return `"${text.replace(/"/g, '""')}"`;
+                    }
+                    return text;
+                });
+                csvContent += cells.join(',') + '\\n';
+            });
+            
+            // Download CSV
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'validation_report.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
         
         // Handle template data - this will be replaced by actual data when rendered
          try {

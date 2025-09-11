@@ -1,5 +1,17 @@
 # Simple Pipeline API Documentation
 
+> ⚠️ **DEPRECATED - UNUSED MODULE**
+>
+> **Important Notice**: This module is no longer used in the FCST application. The `simple_pipeline.py` file exists in the codebase but is not imported or referenced anywhere in the active application. It appears to be dead code from previous refactoring efforts.
+>
+> - **Status**: Deprecated / Unused
+> - **Last Used**: Unknown (not found in current codebase)
+> - **Recommendation**: Consider removing this file and its documentation to reduce codebase maintenance burden
+>
+> This documentation is preserved for historical reference only.
+
+---
+
 The `simple_pipeline.py` module provides a completely standalone forecasting pipeline with minimal dependencies, designed specifically for pickle compatibility and lightweight deployment.
 
 ## Overview

@@ -1,5 +1,17 @@
 # Simple Forecaster API Documentation
 
+> ⚠️ **DEPRECATED - UNUSED MODULE**
+>
+> **Important Notice**: This module is no longer used in the FCST application. The `simple_forecaster.py` file exists in the codebase but is not imported or referenced anywhere in the active application. It appears to be dead code from previous refactoring efforts.
+>
+> - **Status**: Deprecated / Unused
+> - **Last Used**: Unknown (not found in current codebase)
+> - **Recommendation**: Consider removing this file and its documentation to reduce codebase maintenance burden
+>
+> This documentation is preserved for historical reference only.
+
+---
+
 The `simple_forecaster.py` module provides streamlined forecasting capabilities for single NHITS model training, extracted from the original `create_models_action` function for better separation of concerns and maintainability.
 
 ## Classes

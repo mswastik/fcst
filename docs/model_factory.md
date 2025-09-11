@@ -54,7 +54,7 @@ class NeuralModelFactory:
 
 ##### `create_nhits_model(batch_size: int, windows_batch_size: int) -> NHITS`
 
-Creates and configures an NHITS neural forecasting model.
+Creates and configures an NHITS neural forecasting model with current parameters.
 
 ```python
 def create_nhits_model(self, batch_size: int, windows_batch_size: int) -> NHITS:
@@ -68,12 +68,15 @@ def create_nhits_model(self, batch_size: int, windows_batch_size: int) -> NHITS:
 **Returns:**
 - `NHITS`: Configured NHITS model instance
 
-**Configuration:**
-- Stack types: Identity stacks for hierarchical forecasting
-- Network architecture: 2-layer MLP with 64→32→16 units
-- Pooling: Kernel size 2 with frequency downsampling
+**Current Configuration:**
+- Stack types: Identity stacks (2 stacks)
+- Network architecture: [64, 32] → [32, 16] units per stack
+- Pooling: Kernel size 2, frequency downsampling [2, 2]
+- Interpolation: 'nearest' mode
+- Activation: ReLU with 0.1 dropout
 - Loss: RMSE with robust scaling
 - Training: Early stopping with validation checks
+- Random seed: Configured value for reproducibility
 
 ##### `create_lstm_model(batch_size: int) -> LSTM`
 
@@ -93,6 +96,7 @@ def create_lstm_model(self, batch_size: int) -> LSTM:
 **Configuration:**
 - Encoder: 32 hidden units, 1 layer, 0.1 dropout
 - Loss: RMSE with robust scaling
+- Scaler: Robust scaling for outlier handling
 - Training: Standard LSTM architecture for time series
 
 ### StatisticalModelFactory
@@ -127,7 +131,7 @@ def create_statistical_models(season_length: int = 12) -> List:
 
 ### ForecastProcessor
 
-Handles forecast processing and model combination.
+Handles forecast processing and model combination for individual clusters.
 
 ```python
 class ForecastProcessor:
@@ -146,89 +150,110 @@ def __init__(self, config: ModelConfiguration):
 
 #### Methods
 
-##### `create_ensemble_models(df: pl.DataFrame) -> Tuple[List, Tuple[int, int]]`
+##### `process_cluster(cluster_data: pl.DataFrame, cluster_id: str) -> pl.DataFrame`
 
-Creates an ensemble of neural and statistical forecasting models.
+Process a single cluster and generate forecasts using ensemble methods.
 
 ```python
-def create_ensemble_models(self, df: pl.DataFrame) -> Tuple[List, Tuple[int, int]]:
-    """Create ensemble of neural and statistical models."""
+def process_cluster(self, cluster_data: pl.DataFrame, cluster_id: str) -> pl.DataFrame:
+    """Process a single cluster and generate forecasts."""
 ```
 
 **Parameters:**
-- `df` (pl.DataFrame): Input dataframe with time series data
+- `cluster_data` (pl.DataFrame): Time series data for a specific cluster
+- `cluster_id` (str): Identifier for the cluster being processed
 
 **Returns:**
-- `Tuple[List, Tuple[int, int]]`: (models_list, batch_sizes)
-
-**Models Created:**
-1. NHITS neural network model
-2. LSTM neural network model
-3. Statistical models (AutoARIMA, AutoETS, SeasonalNaive)
-
-##### `generate_forecasts(df: pl.DataFrame, models: List) -> pl.DataFrame`
-
-Generates forecasts using the ensemble of models.
-
-```python
-def generate_forecasts(self, df: pl.DataFrame, models: List) -> pl.DataFrame:
-    """Generate forecasts using ensemble models."""
-```
-
-**Parameters:**
-- `df` (pl.DataFrame): Prepared time series dataframe
-- `models` (List): List of trained models
-
-**Returns:**
-- `pl.DataFrame`: Forecast results with predictions from all models
+- `pl.DataFrame`: Combined forecasts for the cluster with ensemble predictions
 
 **Process:**
-1. Fits each model on the training data
-2. Generates predictions for forecast horizon
-3. Combines results into unified dataframe
-4. Handles model failures gracefully
+1. Prepare data for forecasting (select required columns)
+2. Calculate appropriate batch sizes based on number of series
+3. Create neural and statistical models
+4. Generate forecasts from both model types
+5. Combine forecasts using ensemble methods
+6. Return combined results with cluster identifier
 
-##### `combine_forecasts(forecasts: Dict[str, pl.DataFrame]) -> pl.DataFrame`
+### EnsembleForecaster
 
-Combines forecasts from multiple models using ensemble methods.
+Main class for ensemble forecasting across all clusters in the dataset.
 
 ```python
-def combine_forecasts(self, forecasts: Dict[str, pl.DataFrame]) -> pl.DataFrame:
-    """Combine forecasts from multiple models."""
+class EnsembleForecaster:
+    """Main class for ensemble forecasting across clusters."""
+```
+
+#### Initialization
+
+```python
+def __init__(self, horizon: int = 60):
+    """Initialize EnsembleForecaster with forecast horizon."""
 ```
 
 **Parameters:**
-- `forecasts` (Dict[str, pl.DataFrame]): Dictionary of model forecasts
+- `horizon` (int): Forecast horizon in time steps (default: 60)
+
+**Attributes:**
+- `config` (ModelConfiguration): Model configuration with calculated input size
+- `processor` (ForecastProcessor): Forecast processor for individual clusters
+
+#### Methods
+
+##### `generate_forecasts(df_fr: pl.DataFrame) -> pl.DataFrame`
+
+Generate forecasts for all clusters in the dataset using ensemble methods.
+
+```python
+def generate_forecasts(self, df_fr: pl.DataFrame) -> pl.DataFrame:
+    """Generate forecasts for all clusters in the dataset."""
+```
+
+**Parameters:**
+- `df_fr` (pl.DataFrame): Prepared forecasting data with columns ['unique_id', 'ds', 'y', 'cluster']
 
 **Returns:**
-- `pl.DataFrame`: Combined ensemble forecast
+- `pl.DataFrame`: Combined forecasts from all clusters, or None if no forecasts generated
 
-**Ensemble Methods:**
-- Simple averaging of model predictions
-- Weighted averaging based on historical performance
-- Confidence interval calculation from prediction variance
+**Process:**
+1. Calculate optimal input size based on available historical data
+2. Process each cluster separately using ForecastProcessor
+3. Collect forecasts from all clusters
+4. Concatenate results into unified dataframe
+5. Handle clusters with insufficient data gracefully
+
+**Forecast Output Columns:**
+- `unique_id`: Product-location identifier
+- `ds`: Forecast date
+- `NHITS`: NHITS model predictions
+- `LSTM`: LSTM model predictions  
+- `AutoARIMA`: AutoARIMA model predictions
+- `AutoETS`: AutoETS model predictions
+- `SeasonalNaive`: SeasonalNaive model predictions
+- `ensemble`: Ensemble average of all models
+- `cluster`: Cluster identifier
 
 ## Usage Examples
 
-### Basic Model Creation
+### Basic Ensemble Forecasting
 
 ```python
-from forecasting.model_factory import ModelConfiguration, ForecastProcessor
+from forecasting.model_factory import EnsembleForecaster
 
-# Configure models
-config = ModelConfiguration(horizon=60, input_size=24)
-processor = ForecastProcessor(config)
+# Create ensemble forecaster for 60-month horizon
+forecaster = EnsembleForecaster(horizon=60)
 
-# Create ensemble models
-models, batch_sizes = processor.create_ensemble_models(df)
+# Generate forecasts for clustered data
+forecasts = forecaster.generate_forecasts(df_fr)
 
-# Generate forecasts
-forecasts = processor.generate_forecasts(df, models)
+# Forecasts will contain predictions from all models for each cluster
+print(f"Generated forecasts for {len(forecasts)} time series")
 ```
 
-### Custom Model Configuration
+### Advanced Configuration
 
 ```python
+from forecasting.model_factory import ModelConfiguration, EnsembleForecaster
+
 # Custom configuration for short-term forecasting
 config = ModelConfiguration(
     horizon=12,           # 12 months ahead
@@ -237,20 +262,43 @@ config = ModelConfiguration(
     learning_rate=5e-4    # Conservative learning rate
 )
 
+# Create forecaster with custom config
+forecaster = EnsembleForecaster(horizon=12)
+forecaster.config = config  # Override default config
+
+# Generate forecasts
+forecasts = forecaster.generate_forecasts(df_fr)
+```
+
+### Cluster-by-Cluster Processing
+
+```python
+from forecasting.model_factory import ModelConfiguration, ForecastProcessor
+
+# Create processor for individual cluster processing
+config = ModelConfiguration(horizon=60)
 processor = ForecastProcessor(config)
+
+# Process specific cluster
+cluster_data = df_fr.filter(pl.col('cluster') == 'cluster_0')
+cluster_forecasts = processor.process_cluster(cluster_data, 'cluster_0')
+
+# Access individual model predictions
+nhits_predictions = cluster_forecasts['NHITS']
+ensemble_predictions = cluster_forecasts['ensemble']
 ```
 
 ### Statistical Models Only
 
 ```python
 from forecasting.model_factory import StatisticalModelFactory
+from statsforecast import StatsForecast
 
 # Create statistical models for comparison
 stat_models = StatisticalModelFactory.create_statistical_models(season_length=12)
 
-# Use with StatsForecast
-from statsforecast import StatsForecast
-sf = StatsForecast(models=stat_models, freq='M')
+# Use with StatsForecast for traditional forecasting
+sf = StatsForecast(models=stat_models, freq='1mo')
 sf.fit(df)
 predictions = sf.predict(h=12)
 ```
@@ -261,19 +309,28 @@ predictions = sf.predict(h=12)
 - **Memory Usage**: NHITS and LSTM models require significant GPU/CPU memory
 - **Training Time**: Neural models take longer to train than statistical models
 - **Scalability**: Batch size affects both memory usage and training speed
-- **Hyperparameters**: Learning rate and architecture affect convergence
+- **Data Requirements**: Minimum data length validation prevents training failures
+- **Parallel Processing**: Cluster-based processing allows parallel training
 
 ### Statistical Models
-- **Speed**: Statistical models train and predict much faster
+- **Speed**: Statistical models train and predict much faster than neural models
 - **Memory**: Lower memory footprint than neural models
-- **Robustness**: Less sensitive to data quality issues
-- **Interpretability**: Model parameters are more interpretable
+- **Robustness**: Less sensitive to data quality issues and missing values
+- **Fallback Option**: Used when neural models fail due to insufficient data
+
+### Cluster-Based Processing
+- **Parallelization**: Each cluster processed independently, enabling parallel execution
+- **Memory Management**: Smaller datasets per cluster reduce memory requirements
+- **Fault Isolation**: Failures in one cluster don't affect others
+- **Scalability**: Linear scaling with number of clusters
+- **Resource Optimization**: Dynamic batch size calculation based on cluster size
 
 ### Ensemble Processing
-- **Diversity**: Combining neural and statistical models improves robustness
-- **Computational Cost**: Ensemble methods increase total computation time
-- **Memory Management**: Handle large forecast datasets efficiently
+- **Computational Cost**: Running multiple models increases total computation time
+- **Memory Management**: Efficient handling of large forecast datasets
 - **Error Handling**: Graceful degradation when individual models fail
+- **Prediction Diversity**: Combining neural and statistical models improves robustness
+- **Result Consolidation**: Automatic merging of forecasts from all clusters
 
 ## Model Architecture Details
 

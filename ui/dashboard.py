@@ -463,8 +463,8 @@ def raw_data_page():
 
     # Get existing data
     #df_json = '[]'
-    if 'dwn_df_json' in app.storage.user:
-        df_json = app.storage.user['dwn_df_json']
+    #if 'dwn_df_json' in app.storage.user:
+    #    df_json = app.storage.user['dwn_df_json']
 
     # Add authentication header
     from ui.components import AuthHeader
@@ -472,11 +472,18 @@ def raw_data_page():
     auth_header.create_header('/raw_data')
 
     # Query forecast data from database
-    forecast_data = []
+    #forecast_data = []
     db_service = DatabaseUtils.get_database_service()
-    # Try to get current filter state from app storage
+    column_mapping = {
+            'Region': 'region',
+            'Country': 'country',
+            'Area': 'area',
+            'Franchise': 'franchise',
+            'IBP Level 5': 'ibp_level_5',
+            'IBP Level 6': 'ibp_level_6',
+            'CatalogNumber': 'catalog_number'
+        }
     current_filters = app.storage.user['current_filters']
-    # Query final_forecasts table for approved forecasts - simplified fields only
     forecast_query = """
         SELECT
             ff.item_skey, ff.location_skey, ff.forecast_date, ff.forecast_horizon, ff.forecast_value,
@@ -485,169 +492,120 @@ def raw_data_page():
         WHERE ff.is_current = TRUE
         ORDER BY ff.forecast_date DESC, ff.item_skey, ff.location_skey
     """
-
     forecast_query1 = """
-        SELECT
-            ff.item_skey, ff.location_skey, ff.forecast_date, ff.forecast_horizon, ff.forecast_value,
-            ff.model_type
-        FROM da.forecasts ff
-        ORDER BY ff.forecast_date DESC, ff.item_skey, ff.location_skey
-    """
-    # Get user_id from app storage or use 'system' as fallback
+            SELECT 
+                item_skey, 
+                location_skey, 
+                forecast_date, 
+                forecast_horizon, 
+                forecast_value, 
+                model_type
+            FROM da.forecasts 
+            WHERE 1=1
+            """ + (
+                f" AND location_skey IN (SELECT location_skey FROM da.location_hierarchy WHERE {column_mapping.get(current_filters.get('location1', 'country'))} = '{current_filters.get('location2', '')}')"
+                if current_filters.get('location1') and current_filters.get('location2') else ""
+            ) + (
+                f" AND item_skey IN (SELECT demantra_item_skey FROM da.product_hierarchy WHERE {column_mapping.get(current_filters.get('product1', 'franchise'))} = '{current_filters.get('product2', '')}')"
+                if current_filters.get('product1') and current_filters.get('product2') else ""
+            ) + """
+            ORDER BY forecast_date DESC
+            """
     user_id = app.storage.user.get('user_id', 'system')
     forecast_result = db_service.execute_query(forecast_query1, user_id=user_id)
-    #forecast_data = forecast_result.to_dicts()
-    # Add forecast indicator
-    #for item in forecast_data:
-    #    item['data_type'] = 'forecast'
-
-    # Query database directly using Arrow method
-    #db_service = DatabaseUtils.get_database_service()
     sales_df = db_service.get_filtered_sales_actuals(
         location_col=current_filters.get('location1'),
         location_val=current_filters.get('location2'), 
         product_col=current_filters.get('product1'),
         product_val=current_filters.get('product2')
     )
-    '''
-    print(f"DEBUG: Sales data loaded from database, shape: {sales_df.shape}")
-    print(f"DEBUG: Sales data columns: {sales_df.columns}")
-    
-    # Convert SALES_DATE to date for joining
-    if 'sales_date' in sales_df.columns:
-        print(f"DEBUG: Converting sales_date column, dtype: {sales_df['sales_date'].dtype}")
-        if sales_df['sales_date'].dtype == pl.Utf8:
-            sales_df = sales_df.with_columns(
-                pl.col('sales_date').str.strptime(pl.Date, "%Y-%m-%d").alias('join_date')
-            )
-        else:
-            # Convert datetime to date
-            sales_df = sales_df.with_columns(
-                pl.col('sales_date').dt.date().alias('join_date')
-            )
-    '''
-    #forecast_df = None
-    #if forecast_data:
-    #forecast_df = pl.DataFrame(forecast_data)
-    '''
-    # Convert forecast_date to date for joining if it's a string
-    if 'forecast_date' in forecast_df.columns:
-        if forecast_df['forecast_date'].dtype == pl.Utf8:
-            forecast_df = forecast_df.with_columns(
-                pl.col('forecast_date').str.strptime(pl.Date, "%Y-%m-%d").alias('join_date')
-            )
-        else:
-            # If it's already a date, just alias it
-            forecast_df = forecast_df.with_columns(
-                pl.col('forecast_date').alias('join_date')
-            )
-    '''
-    # Add forecast data type
+    sales_df = sales_df.with_columns(pl.col('sales_date').alias('join_date'))
+
     forecast_df = forecast_result.clone()
-    forecast_df = forecast_df.with_columns(
-        pl.lit('forecast').alias('data_type')
-    )
+    forecast_df = forecast_df.with_columns(pl.col('forecast_date').cast(pl.Datetime("us")).alias('join_date'))
+    forecast_df = forecast_df.with_columns(pl.lit('forecast').alias('data_type'))
 
     # Perform join if both datasets exist
     if sales_df is not None and forecast_df is not None:
-        try:
-            # Create unique ID for joining - map columns correctly
-            # Sales data has 'catalog_number' and we need to find location equivalent
-            # Forecast data has 'item_skey' and 'location_skey'
-            
-            # For sales data: use item_skey and country (or region/area)
-            sales_df = sales_df.with_columns(
-                (pl.col('item_skey').cast(pl.Utf8) + '_' + 
-                    pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-            )
-            print(f"DEBUG: Created unique_id for sales using item_skey + location_skey")
-            
-            # For forecast data: use item_skey and location_skey
-            forecast_df = forecast_df.with_columns(
-                (pl.col('item_skey').cast(pl.Utf8) + '_' + 
-                 pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-            )
-            print(f"DEBUG: Created unique_id for forecast using item_skey + location_skey")
-            
-            print(f"DEBUG: Sales unique_ids sample: {sales_df['unique_id'].head(3).to_list()}")
-            print(f"DEBUG: Forecast unique_ids sample: {forecast_df['unique_id'].head(3).to_list()}")
-            
-            # Left join to keep all sales data and add forecast where available
-            combined_df = sales_df.join(
-                forecast_df.select(['unique_id', 'join_date', 'forecast_value', 'model_type', 'forecast_horizon', 'data_type']),
-                on=['unique_id', 'join_date'],
-                how='left'
-            )
-            
-            # Rename columns to match expected format in data.html
-            column_mapping = {
-                'act_orders_rev': 'Act Orders Rev',
-                'fcst_stat_final_rev': 'Fcst Stat Final Rev',
-                'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
-                'l2_stat_final_rev': 'L2 Stat Final Rev',
-                'fcst_df_final_rev': 'Fcst DF Final Rev',
-                'l2_df_final_rev': 'L2 DF Final Rev',
-                'act_orders_rev_val': 'Act Orders Rev Val',
-                'l1_df_final_rev': 'L1 DF Final Rev',
-                'l0_df_final_rev': 'L0 DF Final Rev',
-                'fcst_df_final_rev_val': 'Fcst DF Final Rev Val',
-                'sales_date': 'SALES_DATE',
-                'country': 'Country',
-                'region': 'Region',
-                'area': 'Area',
-                'selling_division': 'SellingDivision',
-                'stryker_group_region': 'StrykerGroupRegion',
-                'catalog_number': 'CatalogNumber',
-                'business_sector': 'Business Sector',
-                'business_unit': 'Business Unit',
-                'franchise': 'Franchise',
-                'product_line': 'Product Line',
-                'ibp_level_5': 'IBP Level 5',
-                'ibp_level_6': 'IBP Level 6',
-                'ibp_level_7': 'IBP Level 7',
-                'uom': 'UOM',
-                'pack_content': 'PackContent',
-                'model_type': 'model_type',
-                'forecast_horizon': 'forecast_horizon',
-                'forecast_value': 'forecast_value',
-                'data_type': 'data_type'
-            }
-            
-            print(f"Combined data shape after join: {combined_df.shape}")
-            print(f"Combined data columns: {combined_df.columns}")
-            combined_df=combined_df.rename(column_mapping)
-            # Convert back to list of dicts
-            combined_data = combined_df.to_dicts()
-            
-            # Add data_type to sales rows that don't have forecast
-            for item in combined_data:
-                if item.get('data_type') != 'forecast':
-                    item['data_type'] = 'sales_actuals'
-            
-            print(f"DEBUG: Sample of combined data: {combined_data[:5]}")
-            
-        except Exception as e:
-            print(f"Error joining data: {e}")
-            import traceback
-            print(f"DEBUG: Join error traceback: {traceback.format_exc()}")
-            # Fallback to separate datasets
-            combined_data = sales_df.to_dicts() if sales_df is not None else []
-            combined_data.extend(forecast_data)
-            
-    elif sales_df is not None:
-        print(f"DEBUG: Only sales_df exists, shape: {sales_df.shape}")
-        combined_data = sales_df.to_dicts()
-        # Add data type to sales data
-        for item in combined_data:
-            item['data_type'] = 'sales_actuals'
-            
-    elif forecast_df is not None:
-        print(f"DEBUG: Only forecast_df exists, shape: {forecast_df.shape}")
-        combined_data = forecast_df.to_dicts()
+        # For sales data: use item_skey and country (or region/area)
+        sales_df = sales_df.with_columns(
+            (pl.col('item_skey').cast(pl.Utf8) + '_' + 
+                pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+        )
+        print(f"DEBUG: Created unique_id for sales using item_skey + location_skey")
         
-    else:
-        print("DEBUG: Neither sales_df nor forecast_df exist")
-        combined_data = forecast_data if forecast_data else []
+        # For forecast data: use item_skey and location_skey
+        forecast_df = forecast_df.with_columns(
+            (pl.col('item_skey').cast(pl.Utf8) + '_' + 
+                pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+        )
+        
+        print(f"DEBUG: Sales unique_ids sample: {sales_df['unique_id'].head(5).to_list()}")
+        print(f"DEBUG: Forecast unique_ids sample: {forecast_df['unique_id'].head(5).to_list()}")
+        
+        # Debug: Check if there are any matching unique_ids
+        sales_unique_ids = set(sales_df['unique_id'].unique().to_list())
+        forecast_unique_ids = set(forecast_df['unique_id'].unique().to_list())
+        matching_ids = sales_unique_ids.intersection(forecast_unique_ids)
+        print(f"DEBUG: Number of matching unique_ids: {len(matching_ids)}")
+        if len(matching_ids) > 0:
+            print(f"DEBUG: Sample matching IDs: {list(matching_ids)[:3]}")
+        else:
+            print("DEBUG: No matching unique_ids found!")
+            
+        # Debug: Check raw values before unique_id creation
+        print(f"DEBUG: Sales item_skey sample: {sales_df['item_skey'].head(3).to_list()}")
+        print(f"DEBUG: Sales location_skey sample: {sales_df['location_skey'].head(3).to_list()}")
+        print(f"DEBUG: Forecast item_skey sample: {forecast_df['item_skey'].head(3).to_list()}")
+        print(f"DEBUG: Forecast location_skey sample: {forecast_df['location_skey'].head(3).to_list()}")
+        
+        # Left join to keep all sales data and add forecast where available
+        combined_df = sales_df.join(
+            forecast_df.select(['unique_id', 'join_date', 'forecast_value', 'model_type', 'forecast_horizon', 'data_type']),
+            on=['unique_id', 'join_date'],
+            how='left'
+        )
+        # Rename columns to match expected format in data.html
+        column_mapping = {
+            'act_orders_rev': 'Act Orders Rev',
+            'fcst_stat_final_rev': 'Fcst Stat Final Rev',
+            'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
+            'l2_stat_final_rev': 'L2 Stat Final Rev',
+            'fcst_df_final_rev': 'Fcst DF Final Rev',
+            'l2_df_final_rev': 'L2 DF Final Rev',
+            'act_orders_rev_val': 'Act Orders Rev Val',
+            'l1_df_final_rev': 'L1 DF Final Rev',
+            'l0_df_final_rev': 'L0 DF Final Rev',
+            'fcst_df_final_rev_val': 'Fcst DF Final Rev Val',
+            'sales_date': 'SALES_DATE',
+            'country': 'Country',
+            'region': 'Region',
+            'area': 'Area',
+            'selling_division': 'SellingDivision',
+            'stryker_group_region': 'StrykerGroupRegion',
+            'catalog_number': 'CatalogNumber',
+            'business_sector': 'Business Sector',
+            'business_unit': 'Business Unit',
+            'franchise': 'Franchise',
+            'product_line': 'Product Line',
+            'ibp_level_5': 'IBP Level 5',
+            'ibp_level_6': 'IBP Level 6',
+            'ibp_level_7': 'IBP Level 7',
+            'uom': 'UOM',
+            'pack_content': 'PackContent',
+            'model_type': 'model_type',
+            'forecast_horizon': 'forecast_horizon',
+            'forecast_value': 'forecast_value',
+            'data_type': 'data_type'
+        }
+        
+        print(f"Combined data shape after join: {combined_df.shape}")
+        print(f"Combined data columns: {combined_df.columns}")
+        combined_df=combined_df.rename(column_mapping)
+        combined_df=combined_df.with_columns(data_type=pl.when(pl.col('data_type')!='forecast').then(pl.lit('sales_actuals')).otherwise(pl.col('data_type')))
+        combined_data = combined_df.to_dicts()
+        
+        print(f"DEBUG: Sample of combined data: {combined_df}")
 
     # Convert various types to JSON-serializable formats
     def json_serial(obj):

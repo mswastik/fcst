@@ -74,6 +74,16 @@ class EnhancedDatabaseService:
         """Execute a query for a specific user and return Polars DataFrame using Arrow format"""
         if not user_id:
             raise ValueError("user_id is required for multi-user operation")
+            
+        column_mapping = {
+            'Region': 'region',
+            'Country': 'country',
+            'Area': 'area',
+            'Franchise': 'franchise',
+            'IBP Level 5': 'ibp_level_5',
+            'IBP Level 6': 'ibp_level_6',
+            'CatalogNumber': 'catalog_number'
+        }
 
         # Auto-create connection if it doesn't exist
         try:

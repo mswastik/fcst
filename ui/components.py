@@ -2,7 +2,7 @@
 UI Components for the dashboard.
 Extracted from the monolithic dashboard function for better separation of concerns.
 """
-from nicegui import ui, app, run
+from nicegui import ui, app, run, events
 import polars as pl
 import os
 from datetime import datetime, timedelta
@@ -15,6 +15,32 @@ from core.auth_service import auth_service
 from core.utils import DataUtils, DatabaseUtils, UIUtils, ErrorHandler
 
 
+def add_auto_select_first(select: ui.select):
+    """Attaches the auto-select-first behavior to a ui.select element."""
+    #@debounce(0.3)  # Debounce to handle rapid typing
+    def handler(e: events.GenericEventArguments):
+        # Get the current input value from the event
+        input_value = e.args.get('value', '').lower()
+        if not input_value:
+            return  # Do nothing if input is empty
+
+        # Get the current options (handles both list and dict)
+        options = select.options
+        if isinstance(options, dict):
+            options = [(k, v) for k, v in options.items()]  # Convert dict to list of (value, label)
+        else:
+            options = [(opt, opt) for opt in options]  # Treat list as value=label
+
+        # Filter options (case-insensitive substring match, mimicking Quasar's default)
+        filtered = [opt for opt in options if input_value in opt[1].lower()]
+        if filtered:
+            first_match = filtered[0]  # (value, label)
+            select.value = first_match[0]  # Set the value (triggers on_change if bound)
+            select._props['input-value'] = first_match[1]  # Update the input field
+            select.update()  # Ensure UI reflects changes
+
+    select.on('input', handler)  # Attach to input event
+       
 class AuthHeader:
     """Handles authentication header component with login/logout functionality."""
 
@@ -165,9 +191,9 @@ class FilterComponents:
             options=self.options.get('locations_filt', []),
             with_input=True,
             on_change=lambda e: self.on_filter_change('location2', e.value),
-            clearable=True
+            clearable=True,
         ).classes('w-40')
-        
+        add_auto_select_first(self.location_select2)
         # Store references to the select elements
         self.location_select1 = location_select1
         
@@ -198,9 +224,9 @@ class FilterComponents:
             options=self.options.get('products_filt', []),
             with_input=True,
             on_change=lambda e: self.on_filter_change('product2', e.value),
-            clearable=True
+            clearable=True,
         ).classes('w-40')
-        
+        add_auto_select_first(self.product_select2)
         # If we have a value in filter_state, ensure it's selected
         if 'product2' in self.filter_state and self.filter_state['product2']:
             self.product_select2.value = self.filter_state['product2']

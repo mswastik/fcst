@@ -799,6 +799,68 @@ async def agent():
         except:
             return ""
         
+    class SearchQuery:
+        def __init__(self):
+            self._product = ""
+            self._region = ""
+            # Default query templates with placeholders
+            self._query1_template = "{product} medical device category market growth potential for next 5 years in {region}"
+            self._query2_template = "{product} medical device category competitors of Stryker in {region}"
+            self._search_query1 = self._query1_template
+            self._search_query2 = self._query2_template
+            
+        def _format_query(self, template):
+            """Format a query template with current product and region."""
+            return template.format(
+                product=self._product if self._product else "{product}",
+                region=self._region if self._region else "{region}"
+            )
+            
+        @property
+        def product(self):
+            return self._product
+            
+        @product.setter
+        def product(self, value):
+            self._product = value
+            self._update_search_queries()
+            
+        @property
+        def region(self):
+            return self._region
+            
+        @region.setter
+        def region(self, value):
+            self._region = value
+            self._update_search_queries()
+            
+        def _update_search_queries(self):
+            """Update both search queries with current product and region."""
+            self.search_query1 = self._query1_template
+            self.search_query2 = self._query2_template
+            
+        @property
+        def search_query1(self):
+            return self._format_query(self._search_query1)
+            
+        @search_query1.setter
+        def search_query1(self, value):
+            self._search_query1 = value
+            self._query1_template = value
+            
+        @property
+        def search_query2(self):
+            return self._format_query(self._search_query2)
+            
+        @search_query2.setter
+        def search_query2(self, value):
+            self._search_query2 = value
+            self._query2_template = value
+            
+        @property
+        def queries(self):
+            return [self.search_query1, self.search_query2]
+
     def summarize(text, prompt="Summarize:"):
         stream = client.chat.completions.create(
         model="gemma3n",  # use whatever name your server registered
@@ -819,36 +881,89 @@ async def agent():
                 collected += delta
         return collected
 
-    async def run_agent(product, region, output_area, search_input1, search_input2):
-        queries = [
-            search_input1.value,
-            search_input2.value
-        ]
+    async def run_agent(search_manager):
         output_area.clear()
         with output_area:
-            for q in queries:
+            for q in search_manager.queries:
+                # Skip if either product or region is not specified
+                if not search_manager.product or not search_manager.region:
+                    ui.notify("Please enter both product and region", type='warning')
+                    return
+                    
+                ui.notify(f"Running search: {q}")
                 urls = search_web(q)
-                scraped = [scrape_page(u) for u in urls]
-                combined_text = " ".join(scraped)
-                with ui.column().classes('w-1/2'):
+                if not urls:
+                    ui.notify("No results found", type='warning')
+                    continue
+                
+                with ui.column().classes('w-full'):
+                    # Display the search query
                     ui.label(q).classes("font-semibold mt-4")
                     text_area = ui.markdown().classes("whitespace-pre-wrap min-h-0 overflow-visible")
-                    content = ''
-                    for token in summarize(combined_text, prompt=f"You are a {role_input.value}, your goal is to {goal_input.value} from these paragraphs: {q}"):
-                        content += token
-                        text_area.set_content(content)
-                        await ui.run_javascript('void 0',timeout=5) # Force UI update
+                    
+                    # Initialize content with loading message
+                    text_area.set_content("## Gathering information...\n\nPlease wait while we collect and analyze the sources.")
+                    
+                    # Process all URLs first
+                    sources = []
+                    all_content = []
+                    
+                    for i, url in enumerate(urls, 1):
+                        try:
+                            # Add source to our references
+                            sources.append(f'{i}. <a href="{url}" target="_blank">{url}</a>')
+                            
+                            # Scrape the page
+                            scraped = scrape_page(url)
+                            if scraped:
+                                all_content.append(scraped)
+                            
+                        except Exception as e:
+                            print(f"Error processing {url}: {str(e)}")
+                    
+                    if not all_content:
+                        text_area.set_content("## No content found\n\nCould not retrieve any content from the sources.")
+                        return
+                    
+                    # Combine all content
+                    combined_text = "\n---\n".join(all_content)
+                    
+                    # Generate a single summary from all sources
+                    text_area.set_content("## Analyzing information...\nCreating a comprehensive summary from all sources...")
+                    
+                    summary = ""
+                    final_content = ""
+                    text_area.set_content(final_content)
+                    
+                    # Stream the combined summary
+                    for token in summarize(
+                        combined_text,
+                        prompt=(
+                            f"You are a {role_input.value}. Your task is to {goal_input.value} "
+                            f"and provide a comprehensive summary that addresses: {q}. "
+                            "Focus on key insights, trends, and important details. "
+                            "Be concise but thorough in your analysis."
+                        )
+                    ):
+                        summary += token
+                        text_area.set_content(final_content + summary)
+                        await ui.run_javascript('void 0', timeout=5)
+                    
+                    # Add sources section
+                    if sources:
+                        final_content = f"{summary.replace('\n\n', '').replace('##', '####')}\n#### Sources" + "\n".join(sources)
+                        text_area.set_content(final_content)
     
     with ui.row(wrap=False).classes('w-full'):
         # Toggle button for sidebar
-        toggle_sidebar = ui.button('⚙️ Config', on_click=lambda: drawer.toggle()).classes('absolute top-4 right-4 z-10')
+        toggle_sidebar = ui.button('⚙️ Config', on_click=lambda: drawer.toggle()).classes('absolute top-4 right-1 z-10')
         
         with ui.column().classes('w-1/4 overflow-y-auto'):
             # Tables column with scroll for better space utilization
             pt=ui.table(columns=[{'name':'Product Line','field':'product_line'}]
-                        ,rows=[],row_key="name",on_select=lambda e:product_input.set_value(e.selection[0]['product_line']),selection='single').props('virtual-scroll')
+                        ,rows=[],row_key="name",on_select=lambda e:product_input.set_value(e.selection[0]['product_line']),selection='single').style("height:400px;overflow-y: auto;")
             ct=ui.table(columns=[{'name':'Country','field':'country'}],rows=[],row_key="name",
-                        on_select=lambda e:region_input.set_value(e.selection[0]['country']),selection='single').props('virtual-scroll')
+                        on_select=lambda e:region_input.set_value(e.selection[0]['country']),selection='single').style("height:400px;overflow-y: auto;")
             
             # Initialize tables with database data immediately after creation
             def initialize_tables():
@@ -902,16 +1017,51 @@ async def agent():
             # Main content column - increased width for better output visibility
             ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
             with ui.row():
-                product_input = ui.input("Enter Product") #.classes("w-96") #.bind_value_from(pt, 'name')
-                region_input = ui.input("Enter Region") #.classes("w-96")
-            ui.button("Search", on_click=lambda: run_agent(product_input.value, region_input.value, output_area, search_input1, search_input2)).classes("mt-4")
+                product_input = ui.input(
+                    "Enter Product",
+                    on_change=lambda e: setattr(search_manager, 'product', e.value)
+                )
+                region_input = ui.input(
+                    "Enter Region",
+                    on_change=lambda e: setattr(search_manager, 'region', e.value)
+                )
+            
+            search_button = ui.button(
+                "Search",
+                on_click=lambda: run_agent(search_manager)
+            ).classes("mt-4")
+            
             output_area = ui.column().classes("p-2 bg-gray-100 rounded w-full")
     
     # Create right-side drawer for agent configuration
-    with ui.drawer('right').classes('bg-gray-50') as drawer:
+    with ui.drawer('right',value=False).classes('bg-gray-50') as drawer:
         drawer.props('width=300')
-        with ui.column().classes('w-full p-0 gap--y-4'):
+        with ui.column().classes('w-full gap-2'):
             ui.label('Agent Configuration').classes('text-xl font-bold mb-4')
+            
+            # Initialize search manager
+            search_manager = SearchQuery()
+            
+            search_input1 = ui.textarea(
+                label="Search Query 1",
+                value=search_manager._query1_template,
+                on_change=lambda e: setattr(search_manager, 'search_query1', e.value)
+            ).props('input-style="height:36px').classes('w-full')
+            
+            search_input2 = ui.textarea(
+                label="Search Query 2",
+                value=search_manager._query2_template,
+                on_change=lambda e: setattr(search_manager, 'search_query2', e.value)
+            ).props('input-style="height:36px"').classes('w-full')
+            
+            # Button to reset to default queries
+            ui.button(
+                "Reset to Default",
+                on_click=lambda: [
+                    search_input1.set_text(search_manager._query1_template),
+                    search_input2.set_text(search_manager._query2_template)
+                ]
+            ).classes('mt-4')
             
             role_input = ui.select(
                 label='Role',
@@ -923,20 +1073,9 @@ async def agent():
             ).classes('w-full')
             
             goal_input = ui.textarea(
-                label='Goal',
+                label='Objective',
                 value="help demand planners generate long term forecasts by providing brief 2 bullet points containing insights " \
                     "on market dynamics that can impact Stryker market share and growth and 1 bullet point containing CAGR over next 5 year of the category",
-                placeholder='Enter the goal for the agent...'
-            ).classes('min-h-0 overflow-visible h-56 w-full')
-            
-            search_input1 = ui.textarea(
-                label="Search Text",
-                placeholder='Enter additional search context...',
-                value=f"{product_input.value} medical device category market growth potential for next 5 years in {region_input.value}"
-            ).classes('min-h-0 overflow-visible h-56 w-full')
-
-            search_input2 = ui.textarea(
-                label="Search Text",
-                placeholder='Enter additional search context...',
-                value=f"{product_input.value} medical device category competitors of Stryker in {region_input.value}"
-            ).classes('min-h-0 overflow-visible h-56 w-full')
+                placeholder='Enter the objective for the agent...'
+            ).props('input-class=h-48').classes('w-full')
+            # Update search inputs when product or region changes

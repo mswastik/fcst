@@ -1048,18 +1048,82 @@ async def agent():
     
     with ui.row(wrap=False).classes('w-full'):
         # Toggle button for sidebar
-        toggle_sidebar = ui.button('⚙️ Config', on_click=lambda: drawer.toggle()).classes('absolute top-4 right-1 z-10')
-        
-        with ui.column().classes('w-1/4 overflow-y-auto'):
-            # Tables column with scroll for better space utilization
-            pt=ui.table(columns=[{'name':'Product Line','field':'product_line'}]
-                        ,rows=[],row_key="name",on_select=lambda e:product_input.set_value(e.selection[0]['product_line']),selection='single').style("height:400px;overflow-y: auto;")
-            ct=ui.table(columns=[{'name':'Country','field':'country'}],rows=[],row_key="name",
-                        on_select=lambda e:region_input.set_value(e.selection[0]['country']),selection='single').style("height:400px;overflow-y: auto;")
+        toggle_sidebar = ui.button('⚙️', on_click=lambda: drawer.toggle()).classes('absolute top-4 right-1 z-10')
+        with ui.column().classes('w-48'):
+            # Cache for database results to prevent multiple queries
+            cached_region_options = []
+            cached_table_data = []
             
-            # Initialize tables with database data immediately after creation
+            product_input = ui.input("Enter Product",on_change=lambda e: setattr(search_manager, 'product', e.value)).classes('w-full')
+            
+            # Initialize region select options with caching
+            if not cached_region_options:
+                try:
+                    db_service = DatabaseUtils.get_database_service()
+                    if db_service is not None:
+                        user_id = app.storage.user.get('user_id', 'system')
+                        country_query = """
+                            SELECT DISTINCT country 
+                            FROM da.location_hierarchy 
+                            WHERE country IS NOT NULL 
+                            ORDER BY country
+                        """
+                        country_result = db_service.execute_query(country_query, user_id=user_id)
+                        if country_result is not None and len(country_result) > 0:
+                            cached_region_options[:] = ['All Regions'] + [row['country'] for row in country_result[['country']].unique().to_dicts()]
+                except Exception as e:
+                    print(f"Error loading region options: {e}")
+                    cached_region_options[:] = ['All Regions']
+            
+            region_input = ui.select(
+                label="Select Region",
+                options=cached_region_options,
+                value='All Regions',
+                with_input=True,
+                on_change=lambda e: filter_table_by_region(e.value)).classes('w-full')
+            
+            def filter_table_by_region(selected_region):
+                """Filter the merged table based on selected region"""
+                try:
+                    if selected_region == 'All Regions':
+                        merged_table.rows = cached_table_data
+                    else:
+                        # Use more efficient filtering with list comprehension
+                        filtered_data = [row for row in cached_table_data if row['country'] == selected_region]
+                        merged_table.rows = filtered_data
+                    merged_table.update()
+                    
+                    # Update search manager region
+                    setattr(search_manager, 'region', selected_region if selected_region != 'All Regions' else '')
+                except Exception as e:
+                    print(f"Error filtering table: {e}")
+                    # Fallback to show all data
+                    merged_table.rows = cached_table_data
+                    merged_table.update()
+            
+            search_button = ui.button("Search",on_click=lambda: run_agent(search_manager)).classes("mt-4")
+
+        with ui.row().classes('w-full'):
+            # Use cached data from the first column
+            all_table_data = cached_table_data
+            
+            # Create the table first
+            merged_table=ui.table(columns=[
+                {'label':'Business Unit','name':'Business Unit','field':'business_unit', 'align': 'left'}, 
+                {'label':'Country','name':'Country','field':'country', 'align': 'left'},
+                {'label':'Last Year YoY','name':'Last Year YoY','field':'last_year_yoy', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'},
+                {'label':'YTD Growth','name':'YTD Growth','field':'ytd_growth', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'}
+            ], rows=[],row_key="business_unit",selection='single').style("height:700px;width:500px;overflow-y: auto;")
+            
+            # Initialize tables with database data only if not already cached
             def initialize_tables():
                 """Initialize Product Line and Country tables with data from database"""
+                if cached_table_data:  # Already loaded
+                    print(f"Using cached data: {len(cached_table_data)} combinations")
+                    merged_table.rows = cached_table_data
+                    merged_table.update()
+                    return
+                    
                 db_service = DatabaseUtils.get_database_service()
                 if db_service is None:
                     print("Database service not available for table initialization")
@@ -1067,63 +1131,132 @@ async def agent():
                 
                 user_id = app.storage.user.get('user_id', 'system')
                 
-                # Initialize Product Line table
+                # Initialize merged Product Line and Country table
                 try:
-                    product_query = """
-                        SELECT DISTINCT product_line 
-                        FROM da.product_hierarchy 
-                        WHERE product_line IS NOT NULL 
-                        ORDER BY product_line
+                    # Optimized query with YoY growth and YTD growth calculation
+                    combined_query = """
+                        WITH yearly_sales AS (
+                            SELECT 
+                                p.business_unit,
+                                l.country,
+                                YEAR(s.sales_date) as sales_year,
+                                SUM(s.act_orders_rev) as total_sales
+                            FROM da.sales_actuals s
+                            JOIN da.product_hierarchy p ON s.item_skey = p.demantra_item_skey
+                            JOIN da.location_hierarchy l ON s.location_skey = l.location_skey
+                            WHERE p.business_unit IS NOT NULL 
+                            AND l.country IS NOT NULL
+                            AND s.act_orders_rev > 0
+                            GROUP BY p.business_unit, l.country, YEAR(s.sales_date)
+                        ),
+                        ytd_sales AS (
+                            SELECT 
+                                p.business_unit,
+                                l.country,
+                                YEAR(s.sales_date) as sales_year,
+                                SUM(s.act_orders_rev) as ytd_sales
+                            FROM da.sales_actuals s
+                            JOIN da.product_hierarchy p ON s.item_skey = p.demantra_item_skey
+                            JOIN da.location_hierarchy l ON s.location_skey = l.location_skey
+                            WHERE p.business_unit IS NOT NULL 
+                            AND l.country IS NOT NULL
+                            AND s.act_orders_rev > 0
+                            AND s.sales_date <= CURRENT_DATE
+                            AND YEAR(s.sales_date) >= YEAR(CURRENT_DATE) - 1
+                            -- Ensure same months comparison: for previous year, only include up to current month
+                            AND (
+                                YEAR(s.sales_date) = YEAR(CURRENT_DATE)
+                                OR
+                                (YEAR(s.sales_date) = YEAR(CURRENT_DATE) - 1 AND MONTH(s.sales_date) <= MONTH(CURRENT_DATE))
+                            )
+                            GROUP BY p.business_unit, l.country, YEAR(s.sales_date)
+                        ),
+                        growth_metrics AS (
+                            -- Last year's YoY growth (completed year)
+                            SELECT 
+                                curr.business_unit,
+                                curr.country,
+                                'last_year_yoy' as metric_type,
+                                CASE 
+                                    WHEN prev.total_sales > 0 THEN 
+                                        ROUND(((curr.total_sales - prev.total_sales) / prev.total_sales) * 100, 2)
+                                    ELSE NULL
+                                END as growth_value
+                            FROM yearly_sales curr
+                            LEFT JOIN yearly_sales prev ON 
+                                curr.business_unit = prev.business_unit 
+                                AND curr.country = prev.country 
+                                AND curr.sales_year = prev.sales_year + 1
+                            WHERE curr.sales_year = YEAR(CURRENT_DATE) - 1
+                            
+                            UNION ALL
+                            
+                            -- Current year YTD growth
+                            SELECT 
+                                curr.business_unit,
+                                curr.country,
+                                'ytd_growth' as metric_type,
+                                CASE 
+                                    WHEN prev.ytd_sales > 0 THEN 
+                                        ROUND(((curr.ytd_sales - prev.ytd_sales) / prev.ytd_sales) * 100, 2)
+                                    ELSE NULL
+                                END as growth_value
+                            FROM ytd_sales curr
+                            LEFT JOIN ytd_sales prev ON 
+                                curr.business_unit = prev.business_unit 
+                                AND curr.country = prev.country 
+                                AND curr.sales_year = prev.sales_year + 1
+                            WHERE curr.sales_year = YEAR(CURRENT_DATE)
+                        )
+                        SELECT DISTINCT 
+                            g.business_unit, 
+                            g.country,
+                            MAX(CASE WHEN g.metric_type = 'last_year_yoy' THEN g.growth_value END) as last_year_yoy,
+                            MAX(CASE WHEN g.metric_type = 'ytd_growth' THEN g.growth_value END) as ytd_growth
+                        FROM growth_metrics g
+                        GROUP BY g.business_unit, g.country
+                        ORDER BY g.business_unit, g.country
                     """
-                    product_result = db_service.execute_query(product_query, user_id=user_id)
-                    if product_result is not None and len(product_result) > 0:
-                        product_lines = product_result[['product_line']].unique().to_dicts()
-                        pt.rows = product_lines
-                        pt.update()
-                        print(product_lines)
-                        print(f"Loaded {len(product_lines)} Product Lines from database")
+                    combined_result = db_service.execute_query(combined_query, user_id=user_id)
+                    if combined_result is not None and len(combined_result) > 0:
+                        # Handle NULL values properly
+                        combined_data = []
+                        for row in combined_result[['business_unit', 'country', 'last_year_yoy', 'ytd_growth']].to_dicts():
+                            combined_data.append({
+                                'business_unit': row['business_unit'],
+                                'country': row['country'],
+                                'last_year_yoy': round(float(row['last_year_yoy']), 2) if row['last_year_yoy'] is not None else None,
+                                'ytd_growth': round(float(row['ytd_growth']), 2) if row['ytd_growth'] is not None else None
+                            })
+                        merged_table.rows = combined_data
+                        # Store in both caches
+                        cached_table_data[:] = combined_data
+                        all_table_data[:] = combined_data
+                        merged_table.update()
+                        print(f"Loaded {len(combined_data)} Business Unit and Country combinations from database")
+                    else:
+                        print("No data found in sales_actuals")
                 except Exception as e:
-                    print(f"Error initializing Product Line table: {e}")
-                
-                # Initialize Country table
-                try:
-                    country_query = """
-                        SELECT DISTINCT country 
-                        FROM da.location_hierarchy 
-                        WHERE country IS NOT NULL 
-                        ORDER BY country
-                    """
-                    country_result = db_service.execute_query(country_query, user_id=user_id)
-                    if country_result is not None and len(country_result) > 0:
-                        countries = country_result[['country']].unique().to_dicts()
-                        ct.rows = countries
-                        ct.update()
-                        #print(f"Loaded {len(countries)} Countries from database")
-                except Exception as e:
-                    print(f"Error initializing Country table: {e}")
+                    print(f"Error initializing merged table: {e}")
             
-            # Initialize tables immediately
+            # Initialize tables only once
             initialize_tables()
             
-        with ui.column().classes('w-3/4 p-2'):
-            # Main content column - increased width for better output visibility
-            ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
-            with ui.row():
-                product_input = ui.input(
-                    "Enter Product",
-                    on_change=lambda e: setattr(search_manager, 'product', e.value)
-                )
-                region_input = ui.input(
-                    "Enter Region",
-                    on_change=lambda e: setattr(search_manager, 'region', e.value)
-                )
+            # Set up selection handler after table is created
+            merged_table.on_select(lambda e: (
+                product_input.set_value(e.selection[0]['business_unit']),
+                region_input.set_value(e.selection[0]['country'])
+            ))
             
-            search_button = ui.button(
-                "Search",
-                on_click=lambda: run_agent(search_manager)
-            ).classes("mt-4")
+            # Initialize table with stored data
+            if all_table_data:
+                merged_table.rows = all_table_data
+                merged_table.update()
             
-            output_area = ui.row().classes("p-2 bg-gray-100 rounded w-full gap-4 flex-wrap")
+            with ui.column().classes('w-3/4 p-2'):
+                # Main content column - increased width for better output visibility
+                ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
+                output_area = ui.row().classes("p-2 bg-gray-100 rounded gap-2 flex-wrap")
     
     # Create right-side drawer for agent configuration
     with ui.drawer('right',value=False).classes('bg-gray-50') as drawer:
@@ -1138,13 +1271,13 @@ async def agent():
                 label="Search Query 1",
                 value=search_manager._query1_template,
                 on_change=lambda e: setattr(search_manager, 'search_query1', e.value)
-            ).props('input-style="height:60px"').classes('w-full')
+            ).props('input-style="height:65px"').classes('w-full')
             
             search_input2 = ui.textarea(
                 label="Search Query 2",
                 value=search_manager._query2_template,
                 on_change=lambda e: setattr(search_manager, 'search_query2', e.value)
-            ).props('input-style="height:60px"').classes('w-full')
+            ).props('input-style="height:65px"').classes('w-full')
             
             # Button to reset to default queries
             ui.button(
@@ -1168,11 +1301,11 @@ async def agent():
                 label='Objective',
                 value=search_manager.objective,
                 on_change=lambda e: setattr(search_manager, 'objective', e.value)
-            ).props('input-style="height:160px"').classes('w-full')
+            ).props('input-style="height:180px"').classes('w-full')
             
             # Update the goal input when search_manager's objective changes
-            def update_goal_input():
-                goal_input.set_value(search_manager.objective)
+            #def update_goal_input():
+            #    goal_input.set_value(search_manager.objective)
                 
             # Add a callback to update the goal input when product or region changes
             #def on_product_region_change(e):

@@ -1106,7 +1106,7 @@ async def agent():
 
     with ui.row().classes('w-full'):
         # Left-side table column
-        with ui.column().classes('w-1/4 p-2'):
+        with ui.column().classes('w-1/4 p-2 flex-1'):
             # Use cached data from the first column
             all_table_data = cached_table_data
             

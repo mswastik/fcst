@@ -788,14 +788,14 @@ async def agent():
 
     def search_web(query, max_results=5):
         with DDGS() as ddgs:
-            return [r['href'] for r in ddgs.text(query, max_results=max_results)]
+            return [r['href'] for r in ddgs.text(query, max_results=max_results,safesearch="on", backend="google, brave, yahoo")]
 
     def scrape_page(url):
         try:
             html = requests.get(url, timeout=5).text
             soup = BeautifulSoup(html, "html.parser")
-            print(" ".join([p.get_text() for p in soup.find_all("p")])[:2000])
-            return " ".join([p.get_text() for p in soup.find_all("p")])[:2000]  # limit size
+            print(" ".join([p.get_text() for p in soup.find_all("p")])[:3000])
+            return " ".join([p.get_text() for p in soup.find_all("p")])[:3000]  # limit size
         except:
             return ""
         
@@ -808,6 +808,9 @@ async def agent():
             self._query2_template = "{product} medical device category competitors of Stryker in {region}"
             self._search_query1 = self._query1_template
             self._search_query2 = self._query2_template
+            self._objective_template = "help demand planners generate long term forecasts by providing brief 100 words 3 bullet points containing insights " \
+                    "on market dynamics that can impact market share of Stryker {product} medical device in {region} both positively and negatively. Also mention the expected CAGR over next 5 years of the category"
+            self._objective = self._objective_template
             
         def _format_query(self, template):
             """Format a query template with current product and region."""
@@ -835,9 +838,12 @@ async def agent():
             self._update_search_queries()
             
         def _update_search_queries(self):
-            """Update both search queries with current product and region."""
+            """Update search queries and objective with current product and region."""
             self.search_query1 = self._query1_template
             self.search_query2 = self._query2_template
+            # Update the objective with current product and region
+            if hasattr(self, '_objective_template'):
+                self.objective = self._objective_template
             
         @property
         def search_query1(self):
@@ -860,6 +866,22 @@ async def agent():
         @property
         def queries(self):
             return [self.search_query1, self.search_query2]
+        
+        def _format_objective(self, template):
+            """Format the objective template with current product and region."""
+            return template.format(
+                product=self._product if self._product else "{product}",
+                region=self._region if self._region else "{region}"
+            )
+            
+        @property
+        def objective(self):
+            return self._format_objective(self._objective)
+            
+        @objective.setter
+        def objective(self, value):
+            self._objective = value
+            self._objective_template = value
 
     def summarize(text, prompt="Summarize:"):
         stream = client.chat.completions.create(
@@ -868,7 +890,7 @@ async def agent():
             {"role": "system", "content": prompt},
             {"role": "user", "content": text}
         ],
-        max_tokens=400,
+        max_tokens=500,
         stream=True
         )
         collected = ""
@@ -896,10 +918,10 @@ async def agent():
                     ui.notify("No results found", type='warning')
                     continue
                 
-                with ui.column().classes('w-full'):
+                with ui.column().classes('w-1/2'):
                     # Display the search query
                     ui.label(q).classes("font-semibold mt-4")
-                    text_area = ui.markdown().classes("whitespace-pre-wrap min-h-0 overflow-visible")
+                    text_area = ui.markdown().classes("min-h-0 overflow-visible")
                     
                     # Initialize content with loading message
                     text_area.set_content("## Gathering information...\n\nPlease wait while we collect and analyze the sources.")
@@ -922,19 +944,20 @@ async def agent():
                             print(f"Error processing {url}: {str(e)}")
                     
                     if not all_content:
-                        text_area.set_content("## No content found\n\nCould not retrieve any content from the sources.")
+                        text_area.set_content("### No content found\n\nCould not retrieve any content from the sources.")
                         return
                     
                     # Combine all content
                     combined_text = "\n---\n".join(all_content)
                     
                     # Generate a single summary from all sources
-                    text_area.set_content("## Analyzing information...\nCreating a comprehensive summary from all sources...")
+                    text_area.set_content("### Analyzing information...\nCreating a comprehensive summary from all sources...")
                     
                     summary = ""
                     final_content = ""
                     text_area.set_content(final_content)
-                    
+
+                    print(goal_input.value)
                     # Stream the combined summary
                     for token in summarize(
                         combined_text,
@@ -947,11 +970,11 @@ async def agent():
                     ):
                         summary += token
                         text_area.set_content(final_content + summary)
-                        await ui.run_javascript('void 0', timeout=5)
+                        await ui.run_javascript('void 0', timeout=10)
                     
                     # Add sources section
                     if sources:
-                        final_content = f"{summary.replace('\n\n', '').replace('##', '####')}\n#### Sources" + "\n".join(sources)
+                        final_content = f"{summary.replace('\n\n', '\n').replace('##', '####')}\n#### Sources\n" + "\n".join(sources)
                         text_area.set_content(final_content)
     
     with ui.row(wrap=False).classes('w-full'):
@@ -1031,7 +1054,7 @@ async def agent():
                 on_click=lambda: run_agent(search_manager)
             ).classes("mt-4")
             
-            output_area = ui.column().classes("p-2 bg-gray-100 rounded w-full")
+            output_area = ui.row().classes("p-2 bg-gray-100 rounded w-full")
     
     # Create right-side drawer for agent configuration
     with ui.drawer('right',value=False).classes('bg-gray-50') as drawer:
@@ -1046,13 +1069,13 @@ async def agent():
                 label="Search Query 1",
                 value=search_manager._query1_template,
                 on_change=lambda e: setattr(search_manager, 'search_query1', e.value)
-            ).props('input-style="height:36px').classes('w-full')
+            ).props('input-style="height:60px"').classes('w-full')
             
             search_input2 = ui.textarea(
                 label="Search Query 2",
                 value=search_manager._query2_template,
                 on_change=lambda e: setattr(search_manager, 'search_query2', e.value)
-            ).props('input-style="height:36px"').classes('w-full')
+            ).props('input-style="height:60px"').classes('w-full')
             
             # Button to reset to default queries
             ui.button(
@@ -1074,8 +1097,18 @@ async def agent():
             
             goal_input = ui.textarea(
                 label='Objective',
-                value="help demand planners generate long term forecasts by providing brief 2 bullet points containing insights " \
-                    "on market dynamics that can impact Stryker market share and growth and 1 bullet point containing CAGR over next 5 year of the category",
-                placeholder='Enter the objective for the agent...'
-            ).props('input-class=h-48').classes('w-full')
-            # Update search inputs when product or region changes
+                value=search_manager.objective,
+                on_change=lambda e: setattr(search_manager, 'objective', e.value)
+            ).props('input-style="height:160px"').classes('w-full')
+            
+            # Update the goal input when search_manager's objective changes
+            def update_goal_input():
+                goal_input.set_value(search_manager.objective)
+                
+            # Add a callback to update the goal input when product or region changes
+            def on_product_region_change(e):
+                update_goal_input()
+                
+            # Set up change handlers for product and region inputs
+            #product_input.on_change(on_product_region_change)
+            #region_input.on_change(on_product_region_change)

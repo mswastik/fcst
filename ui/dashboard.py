@@ -8,6 +8,74 @@ import os
 import polars as pl
 from datetime import datetime, timedelta
 import json
+import re
+
+def clean_markdown_content(content: str) -> str:
+    """
+    Clean and normalize markdown content to fix formatting issues.
+
+    Args:
+        content: Raw markdown content string
+
+    Returns:
+        Cleaned markdown content with proper spacing and heading levels
+    """
+    if not content:
+        return content
+
+    # Split into lines for processing
+    lines = content.split('\n')
+    cleaned_lines = []
+    in_code_block = False
+    code_block_marker = ''
+
+    for i, line in enumerate(lines):
+        # Handle headings - reduce level but preserve structure
+        if line.strip().startswith('#'):
+            # Reduce heading levels: # -> ##, ## -> ###, ### -> ####, etc.
+            heading_match = re.match(r'^(#{1,6})\s+(.+)$', line.strip())
+            if heading_match:
+                hashes, text = heading_match.groups()
+                # Ensure minimum level is ##
+                new_level = min(len(hashes) + 1, 6)
+                new_hashes = '##' * new_level
+                line = f"{new_hashes} {text}"
+
+        # Handle lists - ensure proper spacing
+        elif line.strip().startswith(('- ', '* ', '+ ', '1. ', '2. ', '3. ', '4. ', '5. ')):
+            # Ensure list items have proper spacing before them
+            if i > 0 and cleaned_lines and cleaned_lines[-1].strip():
+                # Add blank line before list item if previous line is not blank
+                if not cleaned_lines[-1].strip().startswith(('#', '-', '*', '+')) and not cleaned_lines[-1].strip().startswith(tuple(f'{n}.' for n in range(1, 10))):
+                    cleaned_lines.append('')
+
+        # Handle paragraphs - ensure proper spacing
+        elif line.strip():
+            # If this is a regular paragraph line
+            if i > 0 and cleaned_lines and cleaned_lines[-1].strip():
+                # Check if previous line is also a paragraph (not heading, list, or blank)
+                prev_line = cleaned_lines[-1].strip()
+                if (prev_line and
+                    not prev_line.startswith(('#', '-', '*', '+')) and
+                    not any(prev_line.startswith(f'{n}.') for n in range(1, 10)) and
+                    not re.match(r'^\s*$', prev_line)):
+                    # Add blank line between paragraphs if they're consecutive
+                    if len(line.strip()) > 50:  # Likely a paragraph, not a short line
+                        cleaned_lines.append('')
+
+        cleaned_lines.append(line)
+
+    # Join back and clean up excessive blank lines
+    result = '\n'.join(cleaned_lines)
+
+    # Remove excessive consecutive blank lines (more than 2)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+
+    # Ensure content ends with proper spacing
+    if result and not result.endswith('\n'):
+        result += '\n'
+
+    return result
 
 if not os.path.exists('data/'):
     os.makedirs('data/')
@@ -808,8 +876,9 @@ async def agent():
             self._query2_template = "{product} medical device category competitors of Stryker in {region}"
             self._search_query1 = self._query1_template
             self._search_query2 = self._query2_template
-            self._objective_template = "help demand planners generate long term forecasts by providing brief 100 words 3 bullet points containing insights " \
-                    "on market dynamics that can impact market share of Stryker {product} medical device in {region} both positively and negatively. Also mention the expected CAGR over next 5 years of the category"
+            self._objective_template = "help demand planners generate long term forecasts by providing brief in 100 words and 3 bullet points that contains insights " \
+                    "on market dynamics that can impact demand of Stryker {product} medical device in {region} in coming years both positively and negatively." \
+                    "Also mention the expected CAGR over next 5 years of the category"
             self._objective = self._objective_template
             
         def _format_query(self, template):
@@ -918,10 +987,10 @@ async def agent():
                     ui.notify("No results found", type='warning')
                     continue
                 
-                with ui.column().classes('w-1/2'):
+                with ui.column().classes('w-1/2 flex-shrink-0 no-wrap overflow-x-hidden'):
                     # Display the search query
-                    ui.label(q).classes("font-semibold mt-4")
-                    text_area = ui.markdown().classes("min-h-0 overflow-visible")
+                    ui.label(q).classes("font-semibold mt-4 sticky top-0 bg-white z-10")
+                    text_area = ui.markdown().classes("min-h-0 overflow-visible overflow-x-hidden word-wrap")
                     
                     # Initialize content with loading message
                     text_area.set_content("## Gathering information...\n\nPlease wait while we collect and analyze the sources.")
@@ -963,18 +1032,18 @@ async def agent():
                         combined_text,
                         prompt=(
                             f"You are a {role_input.value}. Your task is to {goal_input.value} "
-                            f"and provide a comprehensive summary that addresses: {q}. "
-                            "Focus on key insights, trends, and important details. "
-                            "Be concise but thorough in your analysis."
+                            f"Use this as context: {q}. "
+                            "Be concise but thorough in your analysis and do not output disclaimer."
                         )
                     ):
                         summary += token
                         text_area.set_content(final_content + summary)
-                        await ui.run_javascript('void 0', timeout=10)
+                        await ui.run_javascript('void 0', timeout=90)
                     
                     # Add sources section
                     if sources:
-                        final_content = f"{summary.replace('\n\n', '\n').replace('##', '####')}\n#### Sources\n" + "\n".join(sources)
+                        cleaned_summary = clean_markdown_content(summary)
+                        final_content = f"{cleaned_summary}\n#### Sources\n" + "\n".join(sources)
                         text_area.set_content(final_content)
     
     with ui.row(wrap=False).classes('w-full'):
@@ -1029,7 +1098,7 @@ async def agent():
                         countries = country_result[['country']].unique().to_dicts()
                         ct.rows = countries
                         ct.update()
-                        print(f"Loaded {len(countries)} Countries from database")
+                        #print(f"Loaded {len(countries)} Countries from database")
                 except Exception as e:
                     print(f"Error initializing Country table: {e}")
             
@@ -1054,7 +1123,7 @@ async def agent():
                 on_click=lambda: run_agent(search_manager)
             ).classes("mt-4")
             
-            output_area = ui.row().classes("p-2 bg-gray-100 rounded w-full")
+            output_area = ui.row().classes("p-2 bg-gray-100 rounded w-full gap-4 flex-wrap")
     
     # Create right-side drawer for agent configuration
     with ui.drawer('right',value=False).classes('bg-gray-50') as drawer:
@@ -1106,8 +1175,8 @@ async def agent():
                 goal_input.set_value(search_manager.objective)
                 
             # Add a callback to update the goal input when product or region changes
-            def on_product_region_change(e):
-                update_goal_input()
+            #def on_product_region_change(e):
+            #    update_goal_input()
                 
             # Set up change handlers for product and region inputs
             #product_input.on_change(on_product_region_change)

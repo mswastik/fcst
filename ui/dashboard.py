@@ -1,4 +1,4 @@
-from nicegui import ui,run,app
+from nicegui import ui, run, app
 import asyncio
 from core.data_model import get_filter_options, generate_sample_data
 from core.data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
@@ -855,10 +855,12 @@ async def agent():
 
     client = OpenAI(base_url="http://localhost:8080/v1",api_key="sk" )
 
+    #@run.io_bound
     def search_web(query, max_results=5):
         with DDGS() as ddgs:
             return [r['href'] for r in ddgs.text(query, max_results=max_results,safesearch="on", backend="google, brave, yahoo")]
 
+    #@run.cpu_bound
     def scrape_page(url):
         try:
             html = requests.get(url, timeout=5).text
@@ -983,10 +985,12 @@ async def agent():
                     return
                     
                 ui.notify(f"Running search: {q}")
-                urls = search_web(q)
+                with ui.spinner() as sw:
+                    urls = await run.io_bound(search_web, q)
                 if not urls:
                     ui.notify("No results found", type='warning')
-                    continue
+                else:
+                    sw.set_visibility(False)
                 
                 with ui.column().classes('flex-shrink-0 no-wrap overflow-x-hidden w-full'):
                     # Display the search query
@@ -1006,9 +1010,11 @@ async def agent():
                             sources.append(f'{i}. <a href="{url}" target="_blank">{url}</a>')
                             
                             # Scrape the page
-                            scraped = scrape_page(url)
+                            with ui.spinner() as sp:
+                                scraped = await run.io_bound(scrape_page, url)
                             if scraped:
                                 all_content.append(scraped)
+                                sp.set_visibility(False)
                             
                         except Exception as e:
                             print(f"Error processing {url}: {str(e)}")
@@ -1257,7 +1263,7 @@ async def agent():
             merged_table.update()
         
         # Right-side output area
-        with ui.column().classes('w-3/4 p-2 flex-1'):
+        with ui.column().classes('min-w-3/4 p-2 flex-1'):
             ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
             output_area = ui.row().classes("p-2 bg-gray-100 rounded flex-1 gap-2 flex-wrap")
     

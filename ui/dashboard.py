@@ -1,4 +1,5 @@
 from nicegui import ui,run,app
+import asyncio
 from core.data_model import get_filter_options, generate_sample_data
 from core.data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
 from core.state_manager import get_global_state
@@ -152,7 +153,7 @@ def create_dashboard():
             print(f"DEBUG: Error in update_ui, clearing loading states: {e}")
             state.set_loading_state('charts', False)
             state.set_loading_state('table', False)
-            ErrorHandler.handle_ui_update_error(e, "UI update")
+            state.set_loading_state('data', False)
     
     async def on_filter_change(filter_name, value):
         """Handle filter change events"""
@@ -987,10 +988,10 @@ async def agent():
                     ui.notify("No results found", type='warning')
                     continue
                 
-                with ui.column().classes('w-1/2 flex-shrink-0 no-wrap overflow-x-hidden'):
+                with ui.column().classes('flex-shrink-0 no-wrap overflow-x-hidden w-full'):
                     # Display the search query
                     ui.label(q).classes("font-semibold mt-4 sticky top-0 bg-white z-10")
-                    text_area = ui.markdown().classes("min-h-0 overflow-visible overflow-x-hidden word-wrap")
+                    text_area = ui.markdown().classes("min-h-0 overflow-visible w-full word-wrap")
                     
                     # Initialize content with loading message
                     text_area.set_content("## Gathering information...\n\nPlease wait while we collect and analyze the sources.")
@@ -1048,13 +1049,13 @@ async def agent():
     
     with ui.row(wrap=False).classes('w-full'):
         # Toggle button for sidebar
-        toggle_sidebar = ui.button('⚙️', on_click=lambda: drawer.toggle()).classes('absolute top-4 right-1 z-10')
-        with ui.column().classes('w-48'):
+        with ui.row().classes('w-full'):
             # Cache for database results to prevent multiple queries
+            toggle_sidebar = ui.button('⚙️', on_click=lambda: drawer.toggle()).classes('absolute top-4 right-1 z-10')
             cached_region_options = []
             cached_table_data = []
             
-            product_input = ui.input("Enter Product",on_change=lambda e: setattr(search_manager, 'product', e.value)).classes('w-full')
+            product_input = ui.input("Enter Product",on_change=lambda e: setattr(search_manager, 'product', e.value)).classes('w-40')
             
             # Initialize region select options with caching
             if not cached_region_options:
@@ -1080,7 +1081,7 @@ async def agent():
                 options=cached_region_options,
                 value='All Regions',
                 with_input=True,
-                on_change=lambda e: filter_table_by_region(e.value)).classes('w-full')
+                on_change=lambda e: filter_table_by_region(e.value)).classes('w-40')
             
             def filter_table_by_region(selected_region):
                 """Filter the merged table based on selected region"""
@@ -1103,7 +1104,9 @@ async def agent():
             
             search_button = ui.button("Search",on_click=lambda: run_agent(search_manager)).classes("mt-4")
 
-        with ui.row().classes('w-full'):
+    with ui.row().classes('w-full'):
+        # Left-side table column
+        with ui.column().classes('w-1/4 p-2'):
             # Use cached data from the first column
             all_table_data = cached_table_data
             
@@ -1113,7 +1116,7 @@ async def agent():
                 {'label':'Country','name':'Country','field':'country', 'align': 'left'},
                 {'label':'Last Year YoY','name':'Last Year YoY','field':'last_year_yoy', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'},
                 {'label':'YTD Growth','name':'YTD Growth','field':'ytd_growth', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'}
-            ], rows=[],row_key="business_unit",selection='single').style("height:700px;width:500px;overflow-y: auto;")
+            ], rows=[],row_key="business_unit",selection='single').style("height:700px;width:460px;overflow-y: auto;")
             
             # Initialize tables with database data only if not already cached
             def initialize_tables():
@@ -1238,25 +1241,25 @@ async def agent():
                         print("No data found in sales_actuals")
                 except Exception as e:
                     print(f"Error initializing merged table: {e}")
-            
-            # Initialize tables only once
-            initialize_tables()
-            
-            # Set up selection handler after table is created
-            merged_table.on_select(lambda e: (
-                product_input.set_value(e.selection[0]['business_unit']),
-                region_input.set_value(e.selection[0]['country'])
-            ))
-            
-            # Initialize table with stored data
-            if all_table_data:
-                merged_table.rows = all_table_data
-                merged_table.update()
-            
-            with ui.column().classes('w-3/4 p-2'):
-                # Main content column - increased width for better output visibility
-                ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
-                output_area = ui.row().classes("p-2 bg-gray-100 rounded gap-2 flex-wrap")
+        
+        # Initialize tables only once
+        initialize_tables()
+        
+        # Set up selection handler after table is created
+        merged_table.on_select(lambda e: (
+            product_input.set_value(e.selection[0]['business_unit']),
+            region_input.set_value(e.selection[0]['country'])
+        ))
+        
+        # Initialize table with stored data
+        if all_table_data:
+            merged_table.rows = all_table_data
+            merged_table.update()
+        
+        # Right-side output area
+        with ui.column().classes('w-3/4 p-2 flex-1'):
+            ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
+            output_area = ui.row().classes("p-2 bg-gray-100 rounded flex-1 gap-2 flex-wrap")
     
     # Create right-side drawer for agent configuration
     with ui.drawer('right',value=False).classes('bg-gray-50') as drawer:

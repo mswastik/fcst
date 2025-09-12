@@ -1106,7 +1106,7 @@ async def agent():
 
     with ui.row().classes('w-full'):
         # Left-side table column
-        with ui.column().classes('w-1/4 p-2 flex-1'):
+        with ui.column().classes('max-w-1/4 p-2 flex-1'):
             # Use cached data from the first column
             all_table_data = cached_table_data
             
@@ -1116,7 +1116,7 @@ async def agent():
                 {'label':'Country','name':'Country','field':'country', 'align': 'left'},
                 {'label':'Last Year YoY','name':'Last Year YoY','field':'last_year_yoy', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'},
                 {'label':'YTD Growth','name':'YTD Growth','field':'ytd_growth', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'}
-            ], rows=[],row_key="business_unit",selection='single').style("height:700px;width:460px;overflow-y: auto;")
+            ], rows=[],row_key="business_unit",selection='single').style("height:700px;overflow-y: auto;")
             
             # Initialize tables with database data only if not already cached
             def initialize_tables():

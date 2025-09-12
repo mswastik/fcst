@@ -17,7 +17,7 @@ class ModelConfiguration:
     def __init__(self, horizon: int = 60, input_size: int = None):
         self.horizon = horizon
         self.input_size = input_size or horizon
-        self.max_steps = 180
+        self.max_steps = 10
         self.learning_rate = 1e-3
         self.random_seed = 42
         self.val_check_steps = 25

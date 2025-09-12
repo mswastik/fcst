@@ -15,3 +15,6 @@ databricks-sql-connector
 authlib>=1.0.0
 requests
 python-dotenv
+llama-cpp-python
+beautifulsoup4
+ddgs

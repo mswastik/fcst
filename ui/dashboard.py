@@ -785,24 +785,7 @@ async def agent():
     from openai import OpenAI
 
     client = OpenAI(base_url="http://localhost:8080/v1",api_key="sk" )
-    
-    '''
-    llm = LLM(
-        model="openai/qwen3",  # Changed to local model identifier
-        temperature=0.7,
-        base_url="http://localhost:8080/v1",  # Assuming this is your llama.cpp server
-        api_key="empty"  # Empty string to prevent OPENAI_API_KEY lookup
-    )
-    
-    # Create agent without external tools
-    agent = Agent(
-        role='Market Research Expert',
-        goal='Provide top brands and latest information based on user query',
-        backstory="An AI assistant with custom LLM settings.",
-        tools=[ScrapeWebsiteTool()],  # No external tools needed
-        llm=llm
-    )
-    '''
+
     def search_web(query, max_results=5):
         with DDGS() as ddgs:
             return [r['href'] for r in ddgs.text(query, max_results=max_results)]
@@ -835,16 +818,11 @@ async def agent():
                 yield delta
                 collected += delta
         return collected
-        #return response.choices[0].message.content
-    def loadfile(e):
-        ldf =pl.read_parquet("data/"+e)
-        pt.update_from_polars(ldf[['Product Line']].unique())
-        ct.update_from_polars(ldf[['Country']].unique())
 
-    async def run_agent(product, region, output_area):
+    async def run_agent(product, region, output_area, search_input1, search_input2):
         queries = [
-            f"{product} mdeical device category market growth potential for next 5 years in {region}",
-            f"{product} mdeical device category competitors of Stryker in {region}"
+            search_input1.value,
+            search_input2.value
         ]
         output_area.clear()
         with output_area:
@@ -854,7 +832,7 @@ async def agent():
                 combined_text = " ".join(scraped)
                 with ui.column().classes('w-1/2'):
                     ui.label(q).classes("font-semibold mt-4")
-                    text_area = ui.markdown().classes("whitespace-pre-wrap")
+                    text_area = ui.markdown().classes("whitespace-pre-wrap min-h-0 overflow-visible")
                     content = ''
                     for token in summarize(combined_text, prompt=f"You are a {role_input.value}, your goal is to {goal_input.value} from these paragraphs: {q}"):
                         content += token
@@ -862,22 +840,103 @@ async def agent():
                         await ui.run_javascript('void 0',timeout=5) # Force UI update
     
     with ui.row(wrap=False).classes('w-full'):
-        with ui.column().classes('w-1/6'):
-            role_input = ui.textarea(label='Role',value="Business Development Manager")
-            goal_input=ui.textarea(label='Goal',value="help demand planners generate long term forecasts by providing brief 2 bullet points containing insights " \
-                "on market dynamics that can impact Stryker market share and growth and 1 bullet point containing CAGR over next 5 year of the category")
-            search_input=ui.textarea(label="Search Text")
-        with ui.column().classes('w-1/6'):
-            data_files_select = ui.select(label='DataFiles',options=os.listdir("data/"),with_input=True,on_change=lambda e: loadfile(e.value)
-                ).classes('w-40')
-            pt=ui.table(columns=[{'name':'Product Line','field':'Product Line'}]
-                        ,rows=[],row_key="name",on_select=lambda e:region_input.set_value(e.selection[0]['Product Line']),selection='single')
-            ct=ui.table(columns=[{'name':'Country','field':'Country'}],rows=[],row_key="name",
-                        on_select=lambda e:product_input.set_value(e.selection[0]['Country']),selection='single')
-        with ui.column().classes('w-4/6 p-2 items-center'):
+        # Toggle button for sidebar
+        toggle_sidebar = ui.button('⚙️ Config', on_click=lambda: drawer.toggle()).classes('absolute top-4 right-4 z-10')
+        
+        with ui.column().classes('w-1/4 overflow-y-auto'):
+            # Tables column with scroll for better space utilization
+            pt=ui.table(columns=[{'name':'Product Line','field':'product_line'}]
+                        ,rows=[],row_key="name",on_select=lambda e:product_input.set_value(e.selection[0]['product_line']),selection='single').props('virtual-scroll')
+            ct=ui.table(columns=[{'name':'Country','field':'country'}],rows=[],row_key="name",
+                        on_select=lambda e:region_input.set_value(e.selection[0]['country']),selection='single').props('virtual-scroll')
+            
+            # Initialize tables with database data immediately after creation
+            def initialize_tables():
+                """Initialize Product Line and Country tables with data from database"""
+                db_service = DatabaseUtils.get_database_service()
+                if db_service is None:
+                    print("Database service not available for table initialization")
+                    return
+                
+                user_id = app.storage.user.get('user_id', 'system')
+                
+                # Initialize Product Line table
+                try:
+                    product_query = """
+                        SELECT DISTINCT product_line 
+                        FROM da.product_hierarchy 
+                        WHERE product_line IS NOT NULL 
+                        ORDER BY product_line
+                    """
+                    product_result = db_service.execute_query(product_query, user_id=user_id)
+                    if product_result is not None and len(product_result) > 0:
+                        product_lines = product_result[['product_line']].unique().to_dicts()
+                        pt.rows = product_lines
+                        pt.update()
+                        print(product_lines)
+                        print(f"Loaded {len(product_lines)} Product Lines from database")
+                except Exception as e:
+                    print(f"Error initializing Product Line table: {e}")
+                
+                # Initialize Country table
+                try:
+                    country_query = """
+                        SELECT DISTINCT country 
+                        FROM da.location_hierarchy 
+                        WHERE country IS NOT NULL 
+                        ORDER BY country
+                    """
+                    country_result = db_service.execute_query(country_query, user_id=user_id)
+                    if country_result is not None and len(country_result) > 0:
+                        countries = country_result[['country']].unique().to_dicts()
+                        ct.rows = countries
+                        ct.update()
+                        print(f"Loaded {len(countries)} Countries from database")
+                except Exception as e:
+                    print(f"Error initializing Country table: {e}")
+            
+            # Initialize tables immediately
+            initialize_tables()
+            
+        with ui.column().classes('w-3/4 p-2'):
+            # Main content column - increased width for better output visibility
             ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
             with ui.row():
                 product_input = ui.input("Enter Product") #.classes("w-96") #.bind_value_from(pt, 'name')
                 region_input = ui.input("Enter Region") #.classes("w-96")
-            ui.button("Search", on_click=lambda: run_agent(product_input.value, region_input.value, output_area)).classes("mt-4")
-            output_area = ui.row(wrap=False).classes("p-2 bg-gray-100 rounded")
+            ui.button("Search", on_click=lambda: run_agent(product_input.value, region_input.value, output_area, search_input1, search_input2)).classes("mt-4")
+            output_area = ui.column().classes("p-2 bg-gray-100 rounded w-full")
+    
+    # Create right-side drawer for agent configuration
+    with ui.drawer('right').classes('bg-gray-50') as drawer:
+        drawer.props('width=300')
+        with ui.column().classes('w-full p-0 gap--y-4'):
+            ui.label('Agent Configuration').classes('text-xl font-bold mb-4')
+            
+            role_input = ui.select(
+                label='Role',
+                options=[
+                    'Demand Planner',
+                    'Market Analyst',
+                    'Business Development Manager',
+                ],value='Demand Planner'
+            ).classes('w-full')
+            
+            goal_input = ui.textarea(
+                label='Goal',
+                value="help demand planners generate long term forecasts by providing brief 2 bullet points containing insights " \
+                    "on market dynamics that can impact Stryker market share and growth and 1 bullet point containing CAGR over next 5 year of the category",
+                placeholder='Enter the goal for the agent...'
+            ).classes('min-h-0 overflow-visible h-56 w-full')
+            
+            search_input1 = ui.textarea(
+                label="Search Text",
+                placeholder='Enter additional search context...',
+                value=f"{product_input.value} medical device category market growth potential for next 5 years in {region_input.value}"
+            ).classes('min-h-0 overflow-visible h-56 w-full')
+
+            search_input2 = ui.textarea(
+                label="Search Text",
+                placeholder='Enter additional search context...',
+                value=f"{product_input.value} medical device category competitors of Stryker in {region_input.value}"
+            ).classes('min-h-0 overflow-visible h-56 w-full')

@@ -82,7 +82,7 @@ class AuthHeader:
             ('/', 'Dashboard'),
             #('/raw_data', 'Raw Data'),
             #('/llms', 'LLMs'),
-            #('/agent', 'Agent')
+            ('/agent', 'Agent')
         ]
         
         with ui.row().classes('items-center gap-1'):

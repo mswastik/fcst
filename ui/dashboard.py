@@ -858,7 +858,7 @@ async def agent():
     #@run.io_bound
     def search_web(query, max_results=5):
         with DDGS() as ddgs:
-            return [r['href'] for r in ddgs.text(query, max_results=max_results,safesearch="on", backend="google, brave, yahoo")]
+            return [r['href'] for r in ddgs.text(query, max_results=max_results,safesearch="on", backend="google")]
 
     #@run.cpu_bound
     def scrape_page(url):
@@ -880,9 +880,10 @@ async def agent():
             self._search_query1 = self._query1_template
             self._search_query2 = self._query2_template
             self._objective_template = "help demand planners generate long term forecasts by providing brief in 100 words and 3 bullet points that contains insights " \
-                    "on market dynamics that can impact demand of Stryker {product} medical device in {region} in coming years both positively and negatively." \
+                    "on market dynamics that can impact demand of Stryker {product} medical device in {region} in coming years both positively and negatively. " \
                     "Also mention the expected CAGR over next 5 years of the category"
             self._objective = self._objective_template
+            self.growth = ''
             
         def _format_query(self, template):
             """Format a query template with current product and region."""
@@ -978,27 +979,28 @@ async def agent():
     async def run_agent(search_manager):
         output_area.clear()
         with output_area:
-            for q in search_manager.queries:
+            print(search_manager.queries)
+            for q in [search_manager.queries[0]]: #Change to search_manager.queries if you want to run all queries
                 # Skip if either product or region is not specified
                 if not search_manager.product or not search_manager.region:
                     ui.notify("Please enter both product and region", type='warning')
                     return
                     
                 ui.notify(f"Running search: {q}")
-                with ui.spinner() as sw:
+                with ui.linear_progress() as sw:
                     urls = await run.io_bound(search_web, q)
                 if not urls:
                     ui.notify("No results found", type='warning')
                 else:
                     sw.set_visibility(False)
                 
-                with ui.column().classes('flex-shrink-0 no-wrap overflow-x-hidden w-full'):
+                with ui.column().classes('overflow-hidden w-full'):
                     # Display the search query
-                    ui.label(q).classes("font-semibold mt-4 sticky top-0 bg-white z-10")
-                    text_area = ui.markdown().classes("min-h-0 overflow-visible w-full word-wrap")
+                    ui.label(q).classes("font-semibold mt-4 sticky top-0 z-10")
+                    text_area = ui.markdown().classes("overflow-y-auto h-full")
                     
                     # Initialize content with loading message
-                    text_area.set_content("## Gathering information...\n\nPlease wait while we collect and analyze the sources.")
+                    text_area.set_content("Gathering information...")
                     
                     # Process all URLs first
                     sources = []
@@ -1010,7 +1012,7 @@ async def agent():
                             sources.append(f'{i}. <a href="{url}" target="_blank">{url}</a>')
                             
                             # Scrape the page
-                            with ui.spinner() as sp:
+                            with ui.spinner('spinner-ball') as sp:
                                 scraped = await run.io_bound(scrape_page, url)
                             if scraped:
                                 all_content.append(scraped)
@@ -1039,8 +1041,8 @@ async def agent():
                         combined_text,
                         prompt=(
                             f"You are a {role_input.value}. Your task is to {goal_input.value} "
-                            f"Use this as context: {q}. "
-                            "Be concise but thorough in your analysis and do not output disclaimer."
+                            f"The current forecast is giving CAGR of {search_manager.growth}, your main task is to either validate or challenge this CAGR from the context you have been given by the user."
+                            "Be concise but thorough in your analysis and do not output disclaimer and do not start with Okay."
                         )
                     ):
                         summary += token
@@ -1099,7 +1101,7 @@ async def agent():
                         filtered_data = [row for row in cached_table_data if row['country'] == selected_region]
                         merged_table.rows = filtered_data
                     merged_table.update()
-                    
+
                     # Update search manager region
                     setattr(search_manager, 'region', selected_region if selected_region != 'All Regions' else '')
                 except Exception as e:
@@ -1122,7 +1124,7 @@ async def agent():
                 {'label':'Country','name':'Country','field':'country', 'align': 'left'},
                 {'label':'Last Year YoY','name':'Last Year YoY','field':'last_year_yoy', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'},
                 {'label':'YTD Growth','name':'YTD Growth','field':'ytd_growth', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'}
-            ], rows=[],row_key="business_unit",selection='single').style("height:700px;overflow-y: auto;")
+            ], rows=[],row_key="row_id",selection='single').style("height:700px;overflow-y: auto;")
             
             # Initialize tables with database data only if not already cached
             def initialize_tables():
@@ -1130,7 +1132,6 @@ async def agent():
                 if cached_table_data:  # Already loaded
                     print(f"Using cached data: {len(cached_table_data)} combinations")
                     merged_table.rows = cached_table_data
-                    merged_table.update()
                     return
                     
                 db_service = DatabaseUtils.get_database_service()
@@ -1237,11 +1238,22 @@ async def agent():
                                 'last_year_yoy': round(float(row['last_year_yoy']), 2) if row['last_year_yoy'] is not None else None,
                                 'ytd_growth': round(float(row['ytd_growth']), 2) if row['ytd_growth'] is not None else None
                             })
+                        # Deduplicate by (business_unit, country)
+                        seen = set()
+                        deduped_data = []
+                        for row in combined_data:
+                            key = (row['business_unit'], row['country'])
+                            if key not in seen:
+                                seen.add(key)
+                                deduped_data.append(row)
+                        combined_data = deduped_data
+                        # Add a unique row_id for the table
+                        for row in combined_data:
+                            row['row_id'] = f"{row['business_unit']}_{row['country']}"
                         merged_table.rows = combined_data
                         # Store in both caches
                         cached_table_data[:] = combined_data
                         all_table_data[:] = combined_data
-                        merged_table.update()
                         print(f"Loaded {len(combined_data)} Business Unit and Country combinations from database")
                     else:
                         print("No data found in sales_actuals")
@@ -1250,17 +1262,18 @@ async def agent():
         
         # Initialize tables only once
         initialize_tables()
-        
+        search_manager = SearchQuery()
         # Set up selection handler after table is created
-        merged_table.on_select(lambda e: (
-            product_input.set_value(e.selection[0]['business_unit']),
+        def on_table_select(e):
+            product_input.set_value(e.selection[0]['business_unit'])
             region_input.set_value(e.selection[0]['country'])
-        ))
+            search_manager.growth = e.selection[0]['ytd_growth']
+        
+        merged_table.on_select(on_table_select)
         
         # Initialize table with stored data
         if all_table_data:
             merged_table.rows = all_table_data
-            merged_table.update()
         
         # Right-side output area
         with ui.column().classes('min-w-3/4 p-2 flex-1'):
@@ -1274,7 +1287,7 @@ async def agent():
             ui.label('Agent Configuration').classes('text-xl font-bold mb-4')
             
             # Initialize search manager
-            search_manager = SearchQuery()
+            
             
             search_input1 = ui.textarea(
                 label="Search Query 1",
@@ -1303,6 +1316,7 @@ async def agent():
                     'Demand Planner',
                     'Market Analyst',
                     'Business Development Manager',
+                    "Devil's Advocate"
                 ],value='Demand Planner'
             ).classes('w-full')
             

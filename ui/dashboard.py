@@ -865,7 +865,7 @@ async def agent():
         try:
             html = requests.get(url, timeout=5).text
             soup = BeautifulSoup(html, "html.parser")
-            print(" ".join([p.get_text() for p in soup.find_all("p")])[:3000])
+            #print(" ".join([p.get_text() for p in soup.find_all("p")])[:3000])
             return " ".join([p.get_text() for p in soup.find_all("p")])[:3000]  # limit size
         except:
             return ""
@@ -879,9 +879,8 @@ async def agent():
             self._query2_template = "{product} medical device category competitors of Stryker in {region}"
             self._search_query1 = self._query1_template
             self._search_query2 = self._query2_template
-            self._objective_template = "help demand planners generate long term forecasts by providing brief in 100 words and 3 bullet points that contains insights " \
-                    "on market dynamics that can impact demand of Stryker {product} medical device in {region} in coming years both positively and negatively. " \
-                    "Also mention the expected CAGR over next 5 years of the category"
+            self._objective_template = "help demand planners generate long term forecasts by providing insights " \
+                    "on market dynamics that can impact demand of Stryker {product} medical device in {region} in coming years both positively and negatively. "
             self._objective = self._objective_template
             self.growth = ''
             
@@ -915,8 +914,8 @@ async def agent():
             self.search_query1 = self._query1_template
             self.search_query2 = self._query2_template
             # Update the objective with current product and region
-            if hasattr(self, '_objective_template'):
-                self.objective = self._objective_template
+            #if hasattr(self, '_objective_template'):
+            self.objective = self._objective_template
             
         @property
         def search_query1(self):
@@ -939,31 +938,24 @@ async def agent():
         @property
         def queries(self):
             return [self.search_query1, self.search_query2]
-        
-        def _format_objective(self, template):
-            """Format the objective template with current product and region."""
-            return template.format(
-                product=self._product if self._product else "{product}",
-                region=self._region if self._region else "{region}"
-            )
             
         @property
         def objective(self):
-            return self._format_objective(self._objective)
+            return self._format_query(self._objective)
             
         @objective.setter
         def objective(self, value):
             self._objective = value
             self._objective_template = value
 
-    def summarize(text, prompt="Summarize:"):
+    def summarize(text, prompt="Summarize:", model="gemma3n"):
         stream = client.chat.completions.create(
-        model="gemma3n",  # use whatever name your server registered
+        model=model,  # use whatever name your server registered
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": text}
         ],
-        max_tokens=500,
+        max_tokens=4500,
         stream=True
         )
         collected = ""
@@ -976,7 +968,7 @@ async def agent():
                 collected += delta
         return collected
 
-    async def run_agent(search_manager):
+    async def run_agent(search_manager, model_name="qwen"):
         output_area.clear()
         with output_area:
             print(search_manager.queries)
@@ -996,7 +988,7 @@ async def agent():
                 
                 with ui.column().classes('overflow-hidden w-full'):
                     # Display the search query
-                    ui.label(q).classes("font-semibold mt-4 sticky top-0 z-10")
+                    ui.label(q).classes("font-semibold mt-2 sticky top-0 z-10")
                     text_area = ui.markdown().classes("overflow-y-auto h-full")
                     
                     # Initialize content with loading message
@@ -1036,24 +1028,87 @@ async def agent():
                     text_area.set_content(final_content)
 
                     print(goal_input.value)
-                    # Stream the combined summary
-                    for token in summarize(
+                    
+                    # Create a function to handle streaming with think tag support
+                    async def handle_streaming_response(stream_generator):
+                        nonlocal summary
+                        think_content = ""
+                        in_think = False
+                        main_content = ""
+                        
+                        # Create UI elements once at the beginning
+                        think_expansion = None
+                        think_markdown = None
+                        main_markdown = None
+                        
+                        for token in stream_generator:
+                            if '<think>' in token:
+                                in_think = True
+                                think_content += token.replace('<think>', '')
+                                if think_expansion is None:
+                                    think_expansion = ui.expansion("Thinking Process",icon='lightbulb').classes('w-full rounded-lg mb-2 bg-gray-300').props('dense')
+                                    with think_expansion:
+                                        think_markdown = ui.markdown("")
+                                continue
+                            elif '</think>' in token:
+                                in_think = False
+                                think_content += token.replace('</think>', '')
+                                continue
+                            elif in_think:
+                                think_content += token
+                                # Update think expansion content incrementally
+                                if think_markdown is not None:
+                                    think_markdown.set_content(think_content.strip())
+                            else:
+                                main_content += token
+                                # Update main content
+                                if main_markdown is None:
+                                    main_markdown = ui.markdown(main_content.strip())
+                                else:
+                                    main_markdown.set_content(main_content.strip())
+                            
+                            # Force UI update
+                            await ui.run_javascript('void 0', timeout=10)
+                        
+                        # Final update
+                        if think_markdown is not None and think_content.strip():
+                            think_markdown.set_content(think_content.strip())
+                        
+                        if main_content.strip():
+                            if main_markdown is None:
+                                ui.markdown(main_content.strip())
+                            else:
+                                main_markdown.set_content(main_content.strip())
+                        
+                        summary = main_content  # Set summary to main content for sources section
+                    
+                    # Stream the combined summary with think tag handling for qwen thinking model
+                    await handle_streaming_response(summarize(
                         combined_text,
                         prompt=(
-                            f"You are a {role_input.value}. Your task is to {goal_input.value} "
-                            f"The current forecast is giving CAGR of {search_manager.growth}, your main task is to either validate or challenge this CAGR from the context you have been given by the user."
-                            "Be concise but thorough in your analysis and do not output disclaimer and do not start with Okay."
-                        )
-                    ):
-                        summary += token
-                        text_area.set_content(final_content + summary)
-                        await ui.run_javascript('void 0', timeout=90)
-                    
-                    # Add sources section
-                    if sources:
+                            f"You are a {role_input.value}. Give your reply in concise 100 words and 3 bullet points to {goal_input.value} "
+                            f"The current forecast within Stryker is giving CAGR of {search_manager.growth}%. "
+                            "Your main task is to look into the web articles provided by user and compare CAGR of Stryker with CAGR forecasts done in these articles. "
+                            "Either validate or challenge this CAGR from the context you have been given by the user."
+                            """Always remember below important points while replying: 
+                                - Do not output disclaimer
+                                - Do not start with Okay
+                                - Be direct and to the point
+                                - Do not ask user question
+                                - Do not output more than 200 words
+                                """
+                        ),
+                        model="qwen-thinking" if "qwen" in model_name.lower() else "gemma3n"
+                    ))
+                
+                    # Add sources section to main content
+                    if sources and summary:
                         cleaned_summary = clean_markdown_content(summary)
-                        final_content = f"{cleaned_summary}\n#### Sources\n" + "\n".join(sources)
-                        text_area.set_content(final_content)
+                        sources_content = f"{cleaned_summary}\n#### Sources\n" + "\n".join(sources)
+                        if main_markdown is not None:
+                            main_markdown.set_content(sources_content)
+                        else:
+                            ui.markdown(sources_content)
     
     with ui.row(wrap=False).classes('w-full'):
         # Toggle button for sidebar
@@ -1112,19 +1167,19 @@ async def agent():
             
             search_button = ui.button("Search",on_click=lambda: run_agent(search_manager)).classes("mt-4")
 
-    with ui.row().classes('w-full'):
-        # Left-side table column
-        with ui.column().classes('max-w-1/4 p-2 flex-1'):
+    with ui.row().classes('w-full gap-0'):
+        # Left-side table column - fixed width
+        with ui.column().classes('w-2/5 p-2'):
             # Use cached data from the first column
             all_table_data = cached_table_data
             
-            # Create the table first
+            # Create the table first with fixed width
             merged_table=ui.table(columns=[
                 {'label':'Business Unit','name':'Business Unit','field':'business_unit', 'align': 'left'}, 
                 {'label':'Country','name':'Country','field':'country', 'align': 'left'},
                 {'label':'Last Year YoY','name':'Last Year YoY','field':'last_year_yoy', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'},
                 {'label':'YTD Growth','name':'YTD Growth','field':'ytd_growth', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'}
-            ], rows=[],row_key="row_id",selection='single').style("height:700px;overflow-y: auto;")
+            ], rows=[],row_key="row_id",selection='single').style("height:700px;overflow-y: auto;width:100%;")
             
             # Initialize tables with database data only if not already cached
             def initialize_tables():
@@ -1156,7 +1211,7 @@ async def agent():
                             JOIN da.location_hierarchy l ON s.location_skey = l.location_skey
                             WHERE p.business_unit IS NOT NULL 
                             AND l.country IS NOT NULL
-                            AND s.act_orders_rev > 0
+                            -- AND s.act_orders_rev > 0
                             GROUP BY p.business_unit, l.country, YEAR(s.sales_date)
                         ),
                         ytd_sales AS (
@@ -1170,7 +1225,7 @@ async def agent():
                             JOIN da.location_hierarchy l ON s.location_skey = l.location_skey
                             WHERE p.business_unit IS NOT NULL 
                             AND l.country IS NOT NULL
-                            AND s.act_orders_rev > 0
+                            -- AND s.act_orders_rev > 0
                             AND s.sales_date <= CURRENT_DATE
                             AND YEAR(s.sales_date) >= YEAR(CURRENT_DATE) - 1
                             -- Ensure same months comparison: for previous year, only include up to current month
@@ -1259,15 +1314,23 @@ async def agent():
                         print("No data found in sales_actuals")
                 except Exception as e:
                     print(f"Error initializing merged table: {e}")
+                merged_table.update()
         
         # Initialize tables only once
         initialize_tables()
         search_manager = SearchQuery()
         # Set up selection handler after table is created
         def on_table_select(e):
+            print(f"TABLE ROW SELECT: {e.selection}")
+            business_unit = e.selection[0]['business_unit']
+            country = e.selection[0]['country']
             product_input.set_value(e.selection[0]['business_unit'])
             region_input.set_value(e.selection[0]['country'])
+            search_manager.product = business_unit
+            search_manager.region = country
+            search_manager.objective.format({"product": business_unit, "region": country})
             search_manager.growth = e.selection[0]['ytd_growth']
+            goal_input.set_value(search_manager.objective)
         
         merged_table.on_select(on_table_select)
         
@@ -1275,10 +1338,10 @@ async def agent():
         if all_table_data:
             merged_table.rows = all_table_data
         
-        # Right-side output area
-        with ui.column().classes('min-w-3/4 p-2 flex-1'):
-            ui.label("Medical Device Market Research Agent").classes("text-xl font-bold")
-            output_area = ui.row().classes("p-2 bg-gray-100 rounded flex-1 gap-2 flex-wrap")
+        # Right-side output area - compact layout
+        with ui.column().classes('w-3/5 p-2'):
+            ui.label("Medical Device Market Research Agent").classes("text-xl font-bold mb-1")
+            output_area = ui.row().classes("bg-gray-100 rounded flex-1 p-2 gap-2 flex-wrap")
     
     # Create right-side drawer for agent configuration
     with ui.drawer('right',value=False).classes('bg-gray-50') as drawer:
@@ -1287,8 +1350,6 @@ async def agent():
             ui.label('Agent Configuration').classes('text-xl font-bold mb-4')
             
             # Initialize search manager
-            
-            
             search_input1 = ui.textarea(
                 label="Search Query 1",
                 value=search_manager._query1_template,

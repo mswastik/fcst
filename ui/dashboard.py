@@ -880,7 +880,8 @@ async def agent():
             self._search_query1 = self._query1_template
             self._search_query2 = self._query2_template
             self._objective_template = "help demand planners generate long term forecasts by providing insights " \
-                    "on market dynamics that can impact demand of Stryker {product} medical device in {region} in coming years both positively and negatively. "
+                    "on market dynamics that can impact demand of Stryker {product} medical device in {region} in coming years both positively and negatively. " \
+                    "Based on the given context, give your opinion whether the Stryker's forecast should be updated or not."
             self._objective = self._objective_template
             self.growth = ''
             
@@ -979,7 +980,7 @@ async def agent():
                     return
                     
                 ui.notify(f"Running search: {q}")
-                with ui.linear_progress() as sw:
+                with ui.spinner() as sw:
                     urls = await run.io_bound(search_web, q)
                 if not urls:
                     ui.notify("No results found", type='warning')
@@ -998,6 +999,15 @@ async def agent():
                     sources = []
                     all_content = []
                     
+                    # Create sources section UI element
+                    sources_section = None
+                    sources_markdown = None
+                    
+                    # Initialize UI elements for streaming response
+                    think_expansion = None
+                    think_markdown = None
+                    main_markdown = None
+                    
                     for i, url in enumerate(urls, 1):
                         try:
                             # Add source to our references
@@ -1009,6 +1019,20 @@ async def agent():
                             if scraped:
                                 all_content.append(scraped)
                                 sp.set_visibility(False)
+                            
+                            # Display sources progressively as they are identified
+                            if sources and sources_section is None:
+                                # Create sources section when first source is found
+                                sources_section = ui.expansion("Sources", icon='link',value='True').props('dense').classes('w-full mb-0 rounded-lg bg-gray-300')
+                                with sources_section:
+                                    sources_markdown = ui.markdown("")
+                            
+                            # Update sources display with current sources
+                            if sources_markdown is not None:
+                                sources_content = "Sources \n\n" + "\n".join(sources)
+                                sources_markdown.set_content(sources_content)
+                                # Force UI update to show sources immediately
+                                await ui.run_javascript('void 0', timeout=10)
                             
                         except Exception as e:
                             print(f"Error processing {url}: {str(e)}")
@@ -1031,28 +1055,28 @@ async def agent():
                     
                     # Create a function to handle streaming with think tag support
                     async def handle_streaming_response(stream_generator):
-                        nonlocal summary
+                        nonlocal summary, think_expansion, think_markdown, main_markdown, sources_section
                         think_content = ""
                         in_think = False
                         main_content = ""
                         
-                        # Create UI elements once at the beginning
-                        think_expansion = None
-                        think_markdown = None
-                        main_markdown = None
+                        # UI elements are now initialized at outer scope
+                        # think_expansion, think_markdown, main_markdown are already defined above
                         
                         for token in stream_generator:
                             if '<think>' in token:
+                                sources_section.value = False
                                 in_think = True
                                 think_content += token.replace('<think>', '')
                                 if think_expansion is None:
-                                    think_expansion = ui.expansion("Thinking Process",icon='lightbulb').classes('w-full rounded-lg mb-2 bg-gray-300').props('dense')
+                                    think_expansion = ui.expansion("Thinking Process",icon='lightbulb',value=True).classes('w-full rounded-lg mb-0 bg-gray-300').props('dense')
                                     with think_expansion:
                                         think_markdown = ui.markdown("")
                                 continue
                             elif '</think>' in token:
                                 in_think = False
                                 think_content += token.replace('</think>', '')
+                                think_expansion.value = False
                                 continue
                             elif in_think:
                                 think_content += token
@@ -1079,8 +1103,9 @@ async def agent():
                                 ui.markdown(main_content.strip())
                             else:
                                 main_markdown.set_content(main_content.strip())
+                                main_markdown.update()
                         
-                        summary = main_content  # Set summary to main content for sources section
+                        #summary = main_content  # Set summary to main content for sources section
                     
                     # Stream the combined summary with think tag handling for qwen thinking model
                     await handle_streaming_response(summarize(
@@ -1089,7 +1114,6 @@ async def agent():
                             f"You are a {role_input.value}. Give your reply in concise 100 words and 3 bullet points to {goal_input.value} "
                             f"The current forecast within Stryker is giving CAGR of {search_manager.growth}%. "
                             "Your main task is to look into the web articles provided by user and compare CAGR of Stryker with CAGR forecasts done in these articles. "
-                            "Either validate or challenge this CAGR from the context you have been given by the user."
                             """Always remember below important points while replying: 
                                 - Do not output disclaimer
                                 - Do not start with Okay
@@ -1101,15 +1125,16 @@ async def agent():
                         model="qwen-thinking" if "qwen" in model_name.lower() else "gemma3n"
                     ))
                 
-                    # Add sources section to main content
-                    if sources and summary:
+                    # Update sources section to show completion and final LLM response
+                    if sources and sources_markdown is not None:
+                        cleaned_summary = clean_markdown_content(summary)
+                        final_sources_content = f"{cleaned_summary}\n#### Sources\n" + "\n".join(sources)
+                        sources_markdown.set_content(final_sources_content)
+                    else:
+                        # Fallback if sources section wasn't created
                         cleaned_summary = clean_markdown_content(summary)
                         sources_content = f"{cleaned_summary}\n#### Sources\n" + "\n".join(sources)
-                        if main_markdown is not None:
-                            main_markdown.set_content(sources_content)
-                        else:
-                            ui.markdown(sources_content)
-    
+                    
     with ui.row(wrap=False).classes('w-full'):
         # Toggle button for sidebar
         with ui.row().classes('w-full'):
@@ -1175,11 +1200,11 @@ async def agent():
             
             # Create the table first with fixed width
             merged_table=ui.table(columns=[
-                {'label':'Business Unit','name':'Business Unit','field':'business_unit', 'align': 'left'}, 
-                {'label':'Country','name':'Country','field':'country', 'align': 'left'},
-                {'label':'Last Year YoY','name':'Last Year YoY','field':'last_year_yoy', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'},
-                {'label':'YTD Growth','name':'YTD Growth','field':'ytd_growth', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"'}
-            ], rows=[],row_key="row_id",selection='single').style("height:700px;overflow-y: auto;width:100%;")
+                {'label':'Business Unit','name':'Business Unit','field':'business_unit', 'align': 'left','auto-width': True}, 
+                {'label':'Country','name':'Country','field':'country', 'align': 'left','auto-width': True},
+                {'label':'Last Year YoY','name':'Last Year YoY','field':'last_year_yoy', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"','auto-width': True},
+                {'label':'YTD Growth','name':'YTD Growth','field':'ytd_growth', 'align': 'right', ':format': 'value => value ? value + "%" : "N/A"','auto-width': True}
+            ], rows=[],row_key="row_id",selection='single').props('dense').style("height:700px;overflow-y: auto;width:100%;")
             
             # Initialize tables with database data only if not already cached
             def initialize_tables():
@@ -1386,15 +1411,3 @@ async def agent():
                 value=search_manager.objective,
                 on_change=lambda e: setattr(search_manager, 'objective', e.value)
             ).props('input-style="height:180px"').classes('w-full')
-            
-            # Update the goal input when search_manager's objective changes
-            #def update_goal_input():
-            #    goal_input.set_value(search_manager.objective)
-                
-            # Add a callback to update the goal input when product or region changes
-            #def on_product_region_change(e):
-            #    update_goal_input()
-                
-            # Set up change handlers for product and region inputs
-            #product_input.on_change(on_product_region_change)
-            #region_input.on_change(on_product_region_change)

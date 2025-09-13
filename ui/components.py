@@ -168,7 +168,7 @@ class FilterComponents:
         with ui.row().classes('w-full gap-2'):
             self._create_location_selects()
             self._create_product_selects()
-            self._create_level_select()
+            #self._create_level_select()
     
     def _create_location_selects(self):
         """Create location filter dropdowns."""

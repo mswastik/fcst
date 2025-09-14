@@ -451,12 +451,37 @@ class ActionButtons:
     
     async def _run_create_models(self):
         """Handle model creation action."""
-        # Get filtered data from global state
-        state = get_global_state()
-        filtered_df = state.filtered_df if state.filtered_df is not None else self.dwn_data.df
+        # Get current filters from filter state
+        current_filters = self.filter_state
+        
+        # Only forecast if both location and product filters are set
+        if not (current_filters.get('location2') and current_filters.get('location1') and
+                current_filters.get('product2') and current_filters.get('product1')):
+            UIUtils.show_error_message('Please set both location and product filters before generating forecasts.', type='warning')
+            return
 
-        if filtered_df is None or len(filtered_df) == 0:
-            UIUtils.show_error_message('No data available for forecasting. Please load and filter data first.', type='warning')
+        # Use the same data source as viewing - query database with current filters
+        try:
+            from core.data_service import DatabaseUtils
+            db_service = DatabaseUtils.get_database_service()
+            if db_service is None:
+                UIUtils.show_error_message('Database service not available.', type='warning')
+                return
+                
+            # Get the same filtered data that will be used for viewing
+            filtered_df = db_service.get_filtered_sales_actuals(
+                location_col=current_filters.get('location1'),
+                location_val=current_filters.get('location2'),
+                product_col=current_filters.get('product1'),
+                product_val=current_filters.get('product2')
+            )
+            
+            if filtered_df is None or len(filtered_df) == 0:
+                UIUtils.show_error_message('No data found with current filters. Please adjust your filters.', type='warning')
+                return
+                
+        except Exception as e:
+            UIUtils.show_error_message(f'Error loading filtered data: {str(e)}', type='warning')
             return
 
         # Show detailed progress notification
@@ -465,12 +490,21 @@ class ActionButtons:
 
         try:
             # Set loading states for all components
+            state = get_global_state()
             state.set_loading_state('charts', True, 'Running forecasting models...')
             state.set_loading_state('table', True, 'Running forecasting models...')
             state.set_loading_state('data', True, 'Running forecasting models...')
 
             # Update progress
             n.message = "Processing data and running forecasting models... This may take several minutes."
+
+            # Debugging chart_components
+            from ui.dashboard import chart_components, details_table, details_container # Ensure import is here
+            print(f"DEBUG: chart_components is {chart_components}")
+            if chart_components is None:
+                UIUtils.show_error_message('Internal Error: chart_components not initialized. Please refresh the page.', type='error')
+                n.dismiss()
+                return
 
             # Use the correct function from data_service instead of simple_pipeline
             result_df = await run.cpu_bound(

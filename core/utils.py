@@ -35,7 +35,7 @@ NUMERIC_COLUMNS = [
 ]
 
 class DataUtils:
-    """Utility class for data manipulation operations."""
+    """Utility functions for data manipulation."""
 
     @staticmethod
     def apply_column_mapping(df: pl.DataFrame) -> pl.DataFrame:
@@ -99,16 +99,36 @@ class DataUtils:
                             df = df.with_columns(
                                 pl.col('sales_date').str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M:%S", strict=False)
                             )
-                        except Exception:
-                            try:
-                                # Try date only format: "2022-09-01"
-                                df = df.with_columns(
-                                    pl.col('sales_date').str.strptime(pl.Date, "%Y-%m-%d", strict=False)
-                                )
-                            except Exception:
-                                # If all conversions fail, keep as string
-                                pass
-        print(df)
+                        except Exception as e:
+                            print(f"Warning: Could not parse 'sales_date' column as datetime. Error: {e}")
+                            # If all parsing fails, convert to string to avoid further errors
+                            df = df.with_columns(pl.col('sales_date').cast(pl.Utf8))
+        
+        # Ensure 'sales_date' is a datetime type for further operations
+        if 'sales_date' in df.columns and df['sales_date'].dtype != pl.Datetime:
+            try:
+                df = df.with_columns(pl.col('sales_date').cast(pl.Datetime))
+            except Exception as e:
+                print(f"Warning: Could not cast 'sales_date' to Datetime after parsing attempts. Error: {e}")
+                # If casting fails, convert to string to avoid further errors
+                df = df.with_columns(pl.col('sales_date').cast(pl.Utf8))
+
+        # Rename 'sales_date' to 'SALES_DATE' for consistency with chart components
+        if 'sales_date' in df.columns:
+            df = df.rename({'sales_date': 'SALES_DATE'})
+            print("DEBUG: Renamed 'sales_date' to 'SALES_DATE'")
+
+        # Rename 'act_orders_rev' to 'Act Orders Rev' for consistency with chart components
+        if 'act_orders_rev' in df.columns:
+            df = df.rename({'act_orders_rev': 'Act Orders Rev'})
+            print("DEBUG: Renamed 'act_orders_rev' to 'Act Orders Rev'")
+
+        # Rename 'country' to 'Country' for consistency with chart components
+        if 'country' in df.columns:
+            df = df.rename({'country': 'Country'})
+            print("DEBUG: Renamed 'country' to 'Country'")
+
+        return df
         # Convert string datetime columns back to datetime objects
         datetime_columns = []
         for col in df.columns:

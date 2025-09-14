@@ -36,7 +36,8 @@ class DatabricksConnectionManager:
                 connection = sql.connect(
                     server_hostname=self._config.host,
                     http_path=self._http_path,
-                    credentials_provider=lambda: self._config.authenticate
+                    credentials_provider=lambda: self._config.authenticate,
+                    timeout=30  # Add a 30-second timeout
                 )
 
                 self._connections[user_id] = {

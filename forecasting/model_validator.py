@@ -68,10 +68,10 @@ class ModelValidator:
             training_cutoff = validation_month - relativedelta(months=3)
             
             # Get training data (up to 3 months before validation month)
-            training_data = df.filter(pl.col('SALES_DATE').dt.date() <= training_cutoff.date())
+            training_data = df.filter(pl.col('sales_date').dt.date() <= training_cutoff.date())
             
             # Get actual values for the validation month
-            actual_data = df.filter(pl.col('SALES_DATE').dt.date() == validation_month.date())
+            actual_data = df.filter(pl.col('sales_date').dt.date() == validation_month.date())
             
             if training_data.height == 0 or actual_data.height == 0:
                 print(f"Insufficient data for validation month {validation_month.strftime('%Y-%m')}")
@@ -102,7 +102,7 @@ class ModelValidator:
         try:
             dft = DataCleaner.prepare_training_data(training_data)
             dft = DataCleaner.prepare_data_for_forecasting(dft)
-            df_fr = dft.rename({'SALES_DATE': 'ds', 'Act Orders Rev': 'y'})
+            df_fr = dft.rename({'sales_date': 'ds', 'Act Orders Rev': 'y'})
             df_fr = df_fr[['unique_id', 'ds', 'y', 'cluster']]
         except Exception as e:
             print(f"  Error preparing training data: {e}")
@@ -278,8 +278,8 @@ class ModelValidator:
             # Convert validation month to the format used in forecasts
             if 'ds' in forecasts.columns:
                 date_col = 'ds'
-            elif 'SALES_DATE' in forecasts.columns:
-                date_col = 'SALES_DATE'
+            elif 'sales_date' in forecasts.columns:
+                date_col = 'sales_date'
             else:
                 print("    No date column found in forecasts")
                 return pl.DataFrame()
@@ -302,9 +302,9 @@ class ModelValidator:
             # Merge forecasts with actuals on unique_id
             if 'unique_id' not in forecasts.columns:
                 # Create unique_id if not present
-                if 'Country' in forecasts.columns and 'CatalogNumber' in forecasts.columns:
+                if 'country' in forecasts.columns and 'catalog_number' in forecasts.columns:
                     forecasts = forecasts.with_columns(
-                        unique_id=pl.col('Country') + "," + pl.col('CatalogNumber')
+                        unique_id=pl.col('country') + "," + pl.col('catalog_number')
                     )
                 else:
                     print(f"    Cannot create unique_id for {model_name}")
@@ -312,7 +312,7 @@ class ModelValidator:
             
             if 'unique_id' not in actuals.columns:
                 actuals = actuals.with_columns(
-                    unique_id=pl.col('Country') + "," + pl.col('CatalogNumber')
+                    unique_id=pl.col('country') + "," + pl.col('catalog_number')
                 )
             
             # Get forecast values (try different column names based on model)
@@ -336,7 +336,7 @@ class ModelValidator:
             
             # Merge data
             merged = forecasts.select(['unique_id', forecast_col]).join(
-                actuals.select(['unique_id', 'Act Orders Rev']),
+                actuals.select(['unique_id', 'act_orders_rev']),
                 on='unique_id',
                 how='inner'
             )
@@ -347,7 +347,7 @@ class ModelValidator:
             
             # Extract values
             forecast_values = merged[forecast_col].to_numpy()
-            actual_values = merged['Act Orders Rev'].to_numpy()
+            actual_values = merged['act_orders_rev'].to_numpy()
             
             # Remove any null/nan values
             valid_mask = ~(np.isnan(forecast_values) | np.isnan(actual_values))

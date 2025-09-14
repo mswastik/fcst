@@ -95,6 +95,7 @@ class DatabaseService:
 
         try:
             cursor = conn.cursor()
+            # Set a timeout for the cursor operations
             if params:
                 cursor.execute(query, params)
             else:
@@ -462,35 +463,54 @@ class DatabaseService:
                 }
 
     def _get_skeys_for_unique_id(self, unique_id: str, user_id: str) -> Tuple[Optional[int], Optional[int]]:
-        """Helper to get item_skey and location_skey from unique_id (Country,CatalogNumber)"""
+        """Helper to get item_skey and location_skey from unique_id (item_skey_location_skey format)"""
         logger.debug(f"Getting skeys for unique_id: {unique_id}")
         try:
-            country, catalog_number = unique_id.split(',', 1)
-            logger.debug(f"Parsed country: {country}, catalog_number: {catalog_number}")
+            # First try the item_skey_location_skey format
+            item_skey, location_skey = unique_id.split('_', 1)
+            item_skey = int(item_skey)
+            location_skey = int(location_skey)
+            logger.debug(f"Parsed item_skey: {item_skey}, location_skey: {location_skey}")
+            return item_skey, location_skey
         except ValueError:
-            logger.warning(f"Invalid unique_id format: {unique_id}. Expected 'Country,CatalogNumber'")
-            return None, None
+            # If that fails, try the Country,CatalogNumber format as fallback
+            try:
+                country, catalog_number = unique_id.split(',', 1)
+                logger.debug(f"Parsed country: {country}, catalog_number: {catalog_number}")
+            except ValueError:
+                logger.warning(f"Invalid unique_id format: {unique_id}. Expected 'item_skey_location_skey' or 'Country,CatalogNumber'")
+                return None, None
 
         # Query product_hierarchy for item_skey
         logger.debug(f"Querying product_hierarchy for catalog_number: {catalog_number}")
-        product_query = "SELECT demantra_item_skey FROM da.product_hierarchy WHERE catalog_number = ?"
-        product_result = self.execute_query(product_query, (catalog_number,), user_id)
-        item_skey = product_result['demantra_item_skey'] if not product_result.is_empty() else None
-        logger.debug(f"Product query result - item_skey: {item_skey}")
+        product_query = "SELECT demantra_item_skey FROM da.product_hierarchy WHERE UPPER(TRIM(catalog_number)) = UPPER(TRIM(?))"
+        try:
+            product_result = self.execute_query(product_query, (catalog_number,), user_id)
+            item_skey = product_result['demantra_item_skey'][0] if not product_result.is_empty() else None
+            logger.debug(f"Product query result - item_skey: {item_skey}, found {len(product_result)} matches")
+        except Exception as e:
+            logger.error(f"Error querying product_hierarchy: {e}")
+            item_skey = None
 
         # Query location_hierarchy for location_skey
         logger.debug(f"Querying location_hierarchy for country: {country}")
-        location_query = "SELECT location_skey FROM da.location_hierarchy WHERE country = ?"
-        location_result = self.execute_query(location_query, (country,), user_id)
-        location_skey = location_result['location_skey'] if not location_result.is_empty() else None
-        logger.debug(f"Location query result - location_skey: {location_skey}")
+        location_query = "SELECT location_skey FROM da.location_hierarchy WHERE UPPER(TRIM(country)) = UPPER(TRIM(?))"
+        try:
+            location_result = self.execute_query(location_query, (country,), user_id)
+            location_skey = location_result['location_skey'][0] if not location_result.is_empty() else None
+            logger.debug(f"Location query result - location_skey: {location_skey}, found {len(location_result)} matches")
+        except Exception as e:
+            logger.error(f"Error querying location_hierarchy: {e}")
+            location_skey = None
 
         return item_skey, location_skey
 
     def insert_forecasts(self, forecast_df: pl.DataFrame, model_type: str, user_id: str = None) -> int:
         """
         Inserts forecast data into the da.forecasts table.
-        Assumes forecast_df has 'unique_id', 'SALES_DATE' (or 'ds'), and forecast columns (e.g., 'Fcst Ensemble Rev').
+        Assumes forecast_df has 'unique_id', 'forecast_date' (or 'ds' or 'SALES_DATE'), and forecast columns (e.g., 'Fcst Ensemble Rev').
+        If item_skey and location_skey columns are present, uses them directly.
+        Otherwise, parses unique_id in Country,CatalogNumber format.
         """
         if not user_id:
             user_id = "system" # Default to system user if not provided
@@ -512,15 +532,26 @@ class DatabaseService:
             conn = self.connection_manager.get_user_connection(user_id)
             logger.info("New database connection created")
 
-        # Ensure SALES_DATE is present and correctly typed
-        if 'ds' in forecast_df.columns:
-            forecast_df = forecast_df.rename({'ds': 'SALES_DATE'})
-            
-        if 'SALES_DATE' not in forecast_df.columns:
-            raise ValueError("Forecast DataFrame must contain a 'SALES_DATE' column.")
-        
-        # Ensure SALES_DATE is datetime
-        forecast_df = forecast_df.with_columns(pl.col('SALES_DATE').cast(pl.Datetime))
+        # Ensure forecast_date is present and correctly typed (handle different possible column names)
+        date_column_found = False
+        if 'forecast_date' in forecast_df.columns:
+            # Already has the correct column name
+            forecast_df = forecast_df.with_columns(pl.col('forecast_date').cast(pl.Datetime))
+            date_column_found = True
+        elif 'ds' in forecast_df.columns:
+            # Rename 'ds' to 'forecast_date'
+            forecast_df = forecast_df.rename({'ds': 'forecast_date'})
+            forecast_df = forecast_df.with_columns(pl.col('forecast_date').cast(pl.Datetime))
+            date_column_found = True
+        elif 'SALES_DATE' in forecast_df.columns:
+            # Rename 'SALES_DATE' to 'forecast_date'
+            forecast_df = forecast_df.rename({'SALES_DATE': 'forecast_date'})
+            forecast_df = forecast_df.with_columns(pl.col('forecast_date').cast(pl.Datetime))
+            date_column_found = True
+
+        if not date_column_found:
+            raise ValueError("Forecast DataFrame must contain a date column ('forecast_date', 'ds', or 'SALES_DATE').")
+
         logger.info("DataFrame prepared for insertion")
 
         # Prepare data for insertion
@@ -529,39 +560,58 @@ class DatabaseService:
         skipped_count = 0
         total_records = len(forecast_df)
         logger.info(f"Processing {total_records} forecast records")
-        
+
+        # Check if item_skey and location_skey are available directly
+        use_direct_skeys = 'item_skey' in forecast_df.columns and 'location_skey' in forecast_df.columns
+        logger.info(f"Using direct skeys: {use_direct_skeys}")
+
         for i, row in enumerate(forecast_df.iter_rows(named=True)):
             if i % 10 == 0:  # Log progress every 10 records
                 logger.info(f"Processing record {i+1}/{total_records}")
-            
-            unique_id = row.get('unique_id')
-            if not unique_id:
-                logger.warning(f"Skipping row due to missing unique_id: {row}")
-                skipped_count += 1
-                continue
 
-            logger.debug(f"Getting skeys for unique_id: {unique_id}")
-            item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
+            if use_direct_skeys:
+                # Use item_skey and location_skey directly from the dataframe
+                item_skey = row.get('item_skey')
+                location_skey = row.get('location_skey')
 
-            if item_skey is None or location_skey is None:
-                logger.warning(f"Could not find s_keys for unique_id: {unique_id}. Item_skey: {item_skey}, Location_skey: {location_skey}. Skipping row.")
-                skipped_count += 1
-                continue
+                if item_skey is None or location_skey is None:
+                    logger.warning(f"Skipping row due to missing item_skey or location_skey: {row}")
+                    skipped_count += 1
+                    continue
+            else:
+                # Parse unique_id in Country,CatalogNumber format
+                unique_id = row.get('unique_id')
+                if not unique_id:
+                    logger.warning(f"Skipping row due to missing unique_id: {row}")
+                    skipped_count += 1
+                    continue
+
+                logger.debug(f"Getting skeys for unique_id: {unique_id}")
+                item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
+
+                if item_skey is None or location_skey is None:
+                    logger.warning(f"Could not find s_keys for unique_id: {unique_id}. Item_skey: {item_skey}, Location_skey: {location_skey}. Skipping row.")
+                    skipped_count += 1
+                    continue
 
             # Extract forecast value - assuming 'Fcst Ensemble Rev' or 'ensemble' or similar
-            forecast_value = (row.get('Fcst Ensemble Rev', 0.0) or 
-                            row.get('ensemble', 0.0) or 
-                            row.get('NHITS', 0.0)) # Fallback to NHITS if ensemble not present
-            
+            forecast_value = (row.get('Fcst Ensemble Rev', 0.0) or
+                            row.get('ensemble', 0.0) or
+                            row.get('NHITS', 0.0) or
+                            row.get('LSTM', 0.0) or
+                            row.get('AutoARIMA', 0.0) or
+                            row.get('AutoETS', 0.0) or
+                            row.get('SeasonalNaive', 0.0)) # Fallback to any available forecast column
+
             # Determine forecast horizon (months ahead from last actual date)
             # This is a simplification; a more robust solution would compare to the last actual sales date
-            forecast_date = row['SALES_DATE']
-            
+            forecast_date = row['forecast_date']
+
             # Placeholder for horizon - assuming 1 for now, needs actual calculation
             # For simplicity, let's assume horizon is 1 for all forecasts for now
             # A more accurate horizon would require knowing the last actual sales date
             forecast_horizon = 1
-            
+
             # Generate a unique forecast_id
             forecast_id = uuid.uuid4().int & (1<<63)-1 # Generate a 63-bit integer UUID
 
@@ -577,7 +627,7 @@ class DatabaseService:
                 'confidence_upper': row.get('confidence_upper'),
                 'model_version': row.get('model_version', '1.0')
             })
-        
+
         if not records_to_insert:
             logger.warning(f"No valid records to insert after processing. Skipped {skipped_count} records.")
             return 0
@@ -595,36 +645,49 @@ class DatabaseService:
         logger.info(f"Insert query prepared: {insert_query}")
 
         cursor = conn.cursor()
+        # Set a timeout for the cursor operations
         logger.info("Database cursor created")
         
         inserted_count = 0
         try:
-            logger.info("Starting batch insertion...")
-            # Execute in batches
-            for i, row_data in enumerate(insert_df.iter_rows()):
-                if i % 10 == 0:  # Log progress every 10 inserts
-                    logger.info(f"Inserting record {i+1}/{len(insert_df)}")
-                
-                # Convert Polars Series values to Python types for Databricks compatibility
-                python_row_data = []
-                for value in row_data:
-                    if hasattr(value, 'item') and len(value) == 1:  # Polars Series with single element
-                        python_row_data.append(value.item())
-                    elif hasattr(value, 'to_list') and len(value) > 1:  # Polars Series with multiple elements
-                        # For Series with multiple elements, take the first value
-                        python_row_data.append(value[0])
-                    elif hasattr(value, 'item'):  # Other Polars objects
-                        try:
-                            python_row_data.append(value.item())
-                        except ValueError:
-                            # If .item() fails, try to get the first element
-                            python_row_data.append(value[0] if len(value) > 0 else None)
-                    else:
-                        python_row_data.append(value)
-                
-                cursor.execute(insert_query, tuple(python_row_data))
-                inserted_count += 1
+            logger.info(f"Starting batch insertion of {len(insert_df)} records...")
+            # Execute in batches to improve performance
+            batch_size = 100  # Process in batches of 100
+            total_rows = len(insert_df)
             
+            for i in range(0, total_rows, batch_size):
+                batch_end = min(i + batch_size, total_rows)
+                batch_data = insert_df.slice(i, batch_end - i)
+                
+                if i % 100 == 0:  # Log progress every 100 records
+                    logger.info(f"Inserting records {i+1} to {batch_end} of {total_rows}")
+                
+                # Construct batch INSERT statement
+                placeholders = ", ".join(["?" for _ in batch_data.columns])
+                insert_query = f"INSERT INTO da.forecasts ({columns}) VALUES ({placeholders})"
+                
+                # Execute batch insert
+                for row_data in batch_data.iter_rows():
+                    # Convert Polars Series values to Python types for Databricks compatibility
+                    python_row_data = []
+                    for value in row_data:
+                        if hasattr(value, 'item') and len(value) == 1:  # Polars Series with single element
+                            python_row_data.append(value.item())
+                        elif hasattr(value, 'to_list') and len(value) > 1:  # Polars Series with multiple elements
+                            # For Series with multiple elements, take the first value
+                            python_row_data.append(value[0])
+                        elif hasattr(value, 'item'):  # Other Polars objects
+                            try:
+                                python_row_data.append(value.item())
+                            except ValueError:
+                                # If .item() fails, try to get the first element
+                                python_row_data.append(value[0] if len(value) > 0 else None)
+                        else:
+                            python_row_data.append(value)
+                    
+                    cursor.execute(insert_query, tuple(python_row_data))
+                    inserted_count += 1
+                    
             logger.info(f"Successfully inserted {inserted_count} forecast records into da.forecasts. Skipped {skipped_count} records.")
         except Exception as e:
             logger.error(f"Failed to insert forecasts: {e}", exc_info=True)

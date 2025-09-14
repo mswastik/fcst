@@ -147,10 +147,10 @@ def create_enhanced_clusters(df: pl.DataFrame, file_path: str, state: DataState 
         state = get_global_state()
         
     if 'unique_id' not in df.columns:
-        df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
+        df = df.with_columns(unique_id = pl.col('country') + "," + pl.col('catalog_number'))
     # Filter to training data with timezone-safe comparison
     cutoff_date = datetime.today() - relativedelta(months=1)
-    df1 = df.filter(pl.col('SALES_DATE').dt.date() <= cutoff_date.date())
+    df1 = df.filter(pl.col('sales_date').dt.date() <= cutoff_date.date())
     # Extract time series features
     features_df = extract_ts_features(df1)
     
@@ -197,8 +197,28 @@ def create_ensemble_models(df: pl.DataFrame, file_path: str) -> pl.DataFrame:
     dft = prepare_data1(df)
     if DataCleaner is not None:
         dft = DataCleaner.prepare_data_for_forecasting(dft)
-    df_fr = dft.rename({'SALES_DATE': 'ds', 'Act Orders Rev': 'y'})
-    df_fr = df_fr[['unique_id', 'ds', 'y', 'cluster']]
+    
+    # Ensure we have the right columns for forecasting
+    if 'SALES_DATE' in dft.columns:
+        dft = dft.rename({'SALES_DATE': 'ds'})
+    if 'sales_date' in dft.columns:
+        dft = dft.rename({'sales_date': 'ds'})
+    if 'Act Orders Rev' in dft.columns:
+        dft = dft.rename({'Act Orders Rev': 'y'})
+    if 'act_orders_rev' in dft.columns:
+        dft = dft.rename({'act_orders_rev': 'y'})
+    
+    # Ensure we have required columns for the forecaster
+    required_cols = ['unique_id', 'ds', 'y', 'cluster']
+    # Add item_skey and location_skey if they exist
+    if 'item_skey' in dft.columns:
+        required_cols.append('item_skey')
+    if 'location_skey' in dft.columns:
+        required_cols.append('location_skey')
+    
+    # Select only required columns that exist in the dataframe
+    available_cols = [col for col in required_cols if col in dft.columns]
+    df_fr = dft[available_cols]
     
     # Create forecaster and generate forecasts
     if EnsembleForecaster is not None:
@@ -249,24 +269,24 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                 pdf = pd.DataFrame(json_data)
                 
                 # Handle date columns properly before converting to polars
-                if 'SALES_DATE' in pdf.columns:
+                if 'sales_date' in pdf.columns:
                     # Convert string dates to datetime objects
                     try:
-                        pdf['SALES_DATE'] = pd.to_datetime(pdf['SALES_DATE'])
+                        pdf['sales_date'] = pd.to_datetime(pdf['sales_date'])
                     except Exception as date_error:
-                        print(f"Error converting SALES_DATE to datetime: {date_error}")
+                        print(f"Error converting sales_date to datetime: {date_error}")
                         # Try to parse dates manually if automatic conversion fails
                         try:
-                            pdf['SALES_DATE'] = pd.to_datetime(pdf['SALES_DATE'], format='%Y-%m-%d', errors='coerce')
+                            pdf['sales_date'] = pd.to_datetime(pdf['sales_date'], format='%Y-%m-%d', errors='coerce')
                         except Exception as manual_date_error:
                             print(f"Manual date conversion also failed: {manual_date_error}")
                             # Last resort - drop problematic date column and recreate
-                            pdf = pdf.drop('SALES_DATE', axis=1)
-                            pdf['SALES_DATE'] = pd.to_datetime('2024-01-01')
+                            pdf = pdf.drop('sales_date', axis=1)
+                            pdf['sales_date'] = pd.to_datetime('2024-01-01')
                 
                 # Convert numeric columns properly
                 numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev', 
-                              'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev']
+                              'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev', 'act_orders_rev'] # Added 'act_orders_rev'
                 for col in numeric_cols:
                     if col in pdf.columns:
                         try:
@@ -283,37 +303,76 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                 print(f"Pandas intermediate approach also failed: {pandas_error}")
                 # Last resort - create minimal dataframe
                 df = pl.DataFrame({
-                    'SALES_DATE': [datetime.today()],
-                    'Act Orders Rev': [0.0],
-                    'Country': ['UNKNOWN'],
-                    'CatalogNumber': ['UNKNOWN']
+                    'sales_date': [datetime.today()],
+                    'act_orders_rev': [0.0],
+                    'country': ['UNKNOWN'],
+                    'catalog_number': ['UNKNOWN']
                 })
                 print("Using fallback minimal dataframe")
         
+        # Explicitly cast 'act_orders_rev' to Float64 after DataFrame reconstruction
+        if 'act_orders_rev' in df.columns and df['act_orders_rev'].dtype != pl.Float64:
+            try:
+                df = df.with_columns(pl.col('act_orders_rev').cast(pl.Float64).alias('act_orders_rev'))
+                print(f"DEBUG: 'act_orders_rev' cast to Float64. New dtype: {df['act_orders_rev'].dtype}")
+            except Exception as cast_error:
+                print(f"WARNING: Failed to cast 'act_orders_rev' to Float64: {cast_error}")
+                # If casting fails, fill with 0 to prevent further errors
+                df = df.with_columns(pl.col('act_orders_rev').fill_null(0).fill_nan(0).alias('act_orders_rev'))
+
+        # Immediately convert date column to datetime after reconstruction
+        try:
+            if 'sales_date' in df.columns:
+                print(f"Before date conversion: sales_date column type = {df['sales_date'].dtype}")
+                
+                # Check if column is already datetime, if not, convert from string
+                if df['sales_date'].dtype != pl.Datetime:
+                    df = df.with_columns(
+                        pl.col('sales_date').str.to_datetime().alias('sales_date')
+                    )
+                    print(f"After string-to-datetime conversion: sales_date column type = {df['sales_date'].dtype}")
+                else:
+                    print("sales_date column is already datetime, skipping conversion")
+        except Exception as json_date_error:
+            print(f"Error converting JSON date column: {json_date_error}")
+            # If conversion fails, try to cast existing column
+            try:
+                df = df.with_columns(
+                    pl.col('sales_date').cast(pl.Datetime).alias('sales_date')
+                )
+                print(f"After cast: sales_date column type = {df['sales_date'].dtype}")
+            except Exception as cast_error:
+                print(f"Date cast also failed: {cast_error}")
+        
+        print(f"DEBUG: DataFrame dtypes before clustering: {df.dtypes}") # Added debug print
         # Simple clustering if not present
         if 'cluster' not in df.columns:
-            # Ensure SALES_DATE is properly formatted as datetime
+            # Ensure sales_date is properly formatted as datetime
             try:
-                if 'SALES_DATE' in df.columns:
+                if 'sales_date' in df.columns:
                     # Convert to datetime if it's not already
                     df = df.with_columns(
-                        pl.col('SALES_DATE').cast(pl.Datetime).alias('SALES_DATE')
+                        pl.col('sales_date').cast(pl.Datetime).alias('sales_date')
                     )
             except Exception as date_cast_error:
-                print(f"Error casting SALES_DATE to datetime: {date_cast_error}")
+                print(f"Error casting sales_date to datetime: {date_cast_error}")
                 # If date casting fails, create a default date column
                 df = df.with_columns(
-                    pl.lit(datetime.today()).alias('SALES_DATE')
+                    pl.lit(datetime.today()).alias('sales_date')
                 )
             
             # Create unique_id if not present
             if 'unique_id' not in df.columns:
                 try:
-                    df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
+                    # Use item_skey and location_skey to create unique_id for consistency
+                    df = df.with_columns(
+                        (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+                    )
+                    print(f"DEBUG: Created unique_id using item_skey and location_skey. Sample: {df['unique_id'].head(5).to_list()}")
                 except Exception as unique_id_error:
                     print(f"Error creating unique_id: {unique_id_error}")
-                    # Create a simple unique_id
-                    df = df.with_columns(unique_id=pl.lit("UNKNOWN,UNKNOWN"))
+                    # Fallback to a simple unique_id if item_skey or location_skey are missing
+                    df = df.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
             
             # Simple clustering logic with proper date handling
             try:
@@ -321,13 +380,13 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                 print(f"Filtering data before {last_full_month}")
 
                 # Ensure we have the right data types before filtering
-                df1 = df.filter(pl.col('SALES_DATE').dt.date() <= last_full_month.date())
-                df1 = df1[['unique_id', 'SALES_DATE', 'Act Orders Rev']]
-                df1 = df1.with_columns(pl.col('Act Orders Rev').cast(pl.Float32).alias('Act Orders Rev'))
-                df1 = df1.with_columns(ynorm=((pl.col('Act Orders Rev')-pl.col('Act Orders Rev').mean()) / pl.col('Act Orders Rev').std()).over('unique_id'))
+                df1 = df.filter(pl.col('sales_date').dt.date() <= last_full_month.date())
+                df1 = df1[['unique_id', 'sales_date', 'act_orders_rev']]
+                df1 = df1.with_columns(pl.col('act_orders_rev').cast(pl.Float32).alias('act_orders_rev'))
+                df1 = df1.with_columns(ynorm=((pl.col('act_orders_rev')-pl.col('act_orders_rev').mean()) / pl.col('act_orders_rev').std()).over('unique_id'))
                 df1 = df1.fill_nan(0)
                 df1 = df1.with_columns(pl.when(pl.col('ynorm').is_infinite()).then(0).otherwise(pl.col('ynorm')).alias('ynorm'))
-                df1 = df1.pivot(index='unique_id', on='SALES_DATE', values='ynorm', aggregate_function='sum')
+                df1 = df1.pivot(index='unique_id', on='sales_date', values='ynorm', aggregate_function='sum')
                 
                 if len(df1) > 0:
                     bi = Birch(n_clusters=6).fit(df1[:, 1:])
@@ -354,7 +413,7 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                 dft = prepare_data1(df)
                 if DataCleaner is not None:
                     dft = DataCleaner.prepare_data_for_forecasting(dft)
-                df_fr = dft.rename({'SALES_DATE': 'ds', 'Act Orders Rev': 'y'})
+                df_fr = dft.rename({'sales_date': 'ds', 'act_orders_rev': 'y'})
                 df_fr = df_fr[['unique_id', 'ds', 'y', 'cluster']]
                 
                 # Generate forecasts using EnsembleForecaster
@@ -363,12 +422,46 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                 
                 if forecast_df is not None:
                     print(f"Forecast generation successful! Generated {len(forecast_df)} forecast records")
-                    print(f"Forecast columns: {forecast_df.columns}")
+                    print(f"DEBUG: Original df columns before merge: {df.columns}")
+                    print(f"DEBUG: Forecast df columns before merge: {forecast_df.columns}")
+                    print(f"DEBUG: Sample original df unique_id: {df['unique_id'].head(5).to_list()}")
+                    print(f"DEBUG: Sample forecast df unique_id: {forecast_df['unique_id'].head(5).to_list()}")
+                    # Check if sales_date column exists before trying to access it
+                    if 'sales_date' in df.columns:
+                        print(f"DEBUG: Sample original df sales_date: {df['sales_date'].head(5).to_list()}")
+                    else:
+                        print("DEBUG: Original df does not have 'sales_date' column")
+                    # Check if sales_date column exists in forecast_df before trying to access it
+                    if 'sales_date' in forecast_df.columns:
+                        print(f"DEBUG: Sample forecast df sales_date: {forecast_df['sales_date'].head(5).to_list()}")
+                    elif 'ds' in forecast_df.columns:
+                        print(f"DEBUG: Sample forecast df ds: {forecast_df['ds'].head(5).to_list()}")
+                    else:
+                        print("DEBUG: Forecast df does not have 'sales_date' or 'ds' column")
+                
+                    # Rename 'ds' back to 'sales_date' in forecast_df for merging
+                    if 'ds' in forecast_df.columns:
+                        forecast_df = forecast_df.rename({'ds': 'sales_date'})
+                        print("DEBUG: Renamed 'ds' to 'sales_date' in forecast_df for merging.")
+                
+                    # Ensure both dataframes have the sales_date column for merging
+                    # The forecast_df should have sales_date from the rename above
+                    # The original df should already have sales_date
+                    merge_columns = ['unique_id']
+                    if 'sales_date' in forecast_df.columns and 'sales_date' in df.columns:
+                        merge_columns.append('sales_date')
+                    else:
+                        print("Warning: sales_date column missing from one or both dataframes, merging on unique_id only")
+                    
+                    # Merge forecast_df with original df
+                    merged_df = df.join(
+                        forecast_df,
+                        on=merge_columns, # This is the key for merging
+                        how='outer',
+                        coalesce=True
+                    )
                     if len(forecast_df) > 0:
                         print(f"Sample forecast data: {forecast_df.head(3)}")
-                    
-                    # Merge forecasts with original data
-                    merged_df = _merge_forecasts_with_data(df, forecast_df)
                     
                     # Save forecasts to database
                     print("Attempting to save forecasts to database...")
@@ -377,19 +470,96 @@ def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
                     if len(forecast_df) > 0:
                         print(f"Sample forecast data: {forecast_df.head(3)}")
                         print(f"Forecast data types: {forecast_df.dtypes}")
-                    
-                    db_service = DatabaseUtils.get_database_service()
-                    if db_service:
-                        try:
-                            saved_count = db_service.insert_forecasts(forecast_df, model_type="Ensemble")
-                            print(f"Successfully saved {saved_count} forecast records to database")
-                        except Exception as save_error:
-                            print(f"Error saving forecasts to database: {save_error}")
-                            print("Continuing with merged data without saving forecasts")
+                        print(f"Forecast DataFrame columns before processing: {forecast_df.columns}")
+                        
+                        # Ensure forecast DataFrame has required columns for saving
+                        # Handle different possible date column names
+                        if 'ds' in forecast_df.columns:
+                            print("Renaming 'ds' column to 'forecast_date'")
+                            forecast_df = forecast_df.rename({'ds': 'forecast_date'})
+                        elif 'SALES_DATE' in forecast_df.columns:
+                            print("Renaming 'SALES_DATE' column to 'forecast_date'")
+                            forecast_df = forecast_df.rename({'SALES_DATE': 'forecast_date'})
+                        elif 'sales_date' in forecast_df.columns:
+                            print("Renaming 'sales_date' column to 'forecast_date'")
+                            forecast_df = forecast_df.rename({'sales_date': 'forecast_date'})
+                        else:
+                            print("No date column found in forecast DataFrame")
+                        
+                        print(f"Forecast DataFrame columns after date column processing: {forecast_df.columns}")
+                        
+                        # Ensure we have a forecast_date column (required for saving)
+                        if 'forecast_date' not in forecast_df.columns:
+                            print("Warning: Forecast DataFrame missing 'forecast_date' column, cannot save to database")
                             saved_count = 0
-                    else:
-                        print("Database service not available, skipping forecast save")
-                        saved_count = 0
+                        else:
+                            # Ensure forecast_date is properly typed
+                            forecast_df = forecast_df.with_columns(pl.col('forecast_date').cast(pl.Datetime))
+                            
+                            # Ensure we have a forecast value column (use ensemble if available, otherwise use any forecast column)
+                            forecast_value_column = None
+                            possible_forecast_columns = ['ensemble', 'Fcst Ensemble Rev', 'NHITS', 'LSTM', 'AutoARIMA', 'AutoETS', 'SeasonalNaive']
+                            for col in possible_forecast_columns:
+                                if col in forecast_df.columns:
+                                    forecast_value_column = col
+                                    break
+                            
+                            print(f"Found forecast value column: {forecast_value_column}")
+                            print(f"Forecast DataFrame columns: {forecast_df.columns}")
+                            
+                            if forecast_value_column and forecast_value_column != 'forecast_value':
+                                print(f"Renaming '{forecast_value_column}' column to 'forecast_value'")
+                                forecast_df = forecast_df.rename({forecast_value_column: 'forecast_value'})
+                            elif not forecast_value_column:
+                                # If no forecast column found, create a default one
+                                print("No forecast value column found, creating default 'forecast_value' column")
+                                forecast_df = forecast_df.with_columns(pl.lit(0.0).alias('forecast_value'))
+                            else:
+                                print("Forecast value column is already named 'forecast_value'")
+                            # Ensure we have item_skey and location_skey columns for proper saving
+                            if 'item_skey' not in forecast_df.columns or 'location_skey' not in forecast_df.columns:
+                                # Try to extract from unique_id if it's in item_skey_location_skey format
+                                if 'unique_id' in forecast_df.columns:
+                                    print("Extracting item_skey and location_skey from unique_id...")
+                                    # Batch extract item_skey and location_skey from unique_id
+                                    # Assuming unique_id is in format "item_skey_location_skey"
+                                    split_data = forecast_df['unique_id'].str.split('_').to_list()
+                                    item_skeys = []
+                                    location_skeys = []
+                                    
+                                    for parts in split_data:
+                                        if len(parts) == 2:
+                                            try:
+                                                item_skey = int(parts[0])
+                                                location_skey = int(parts[1])
+                                                item_skeys.append(item_skey)
+                                                location_skeys.append(location_skey)
+                                            except ValueError:
+                                                # If conversion fails, use None
+                                                item_skeys.append(None)
+                                                location_skeys.append(None)
+                                        else:
+                                            # Invalid format
+                                            item_skeys.append(None)
+                                            location_skeys.append(None)
+                                    
+                                    forecast_df = forecast_df.with_columns([
+                                        pl.Series('item_skey', item_skeys),
+                                        pl.Series('location_skey', location_skeys)
+                                    ])
+                            
+                            db_service = DatabaseUtils.get_database_service()
+                            if db_service:
+                                try:
+                                    saved_count = db_service.insert_forecasts(forecast_df, model_type="Ensemble")
+                                    print(f"Successfully saved {saved_count} forecast records to database")
+                                except Exception as save_error:
+                                    print(f"Error saving forecasts to database: {save_error}")
+                                    print("Continuing with merged data without saving forecasts")
+                                    saved_count = 0
+                            else:
+                                print("Database service not available, skipping forecast save")
+                                saved_count = 0
                     
                     validation_results = {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0, 'forecasts_generated': len(forecast_df), 'forecasts_saved': saved_count}
                     print(f"Models created successfully. Validation results: {validation_results}")
@@ -443,15 +613,29 @@ def _merge_forecasts_with_data(original_df: pl.DataFrame, forecast_df: pl.DataFr
         
         # Rename forecast columns to match expected format
         forecast_renamed = forecast_df.rename({
-            'ds': 'SALES_DATE',
-            'ensemble': 'Fcst Ensemble Rev'
+            'ds': 'sales_date'
         })
+        
+        # Handle different forecast model column names
+        if 'ensemble' in forecast_renamed.columns:
+            forecast_renamed = forecast_renamed.rename({'ensemble': 'Fcst Ensemble Rev'})
+        elif 'NHITS' in forecast_renamed.columns:
+            forecast_renamed = forecast_renamed.rename({'NHITS': 'Fcst Ensemble Rev'})
+        elif 'LSTM' in forecast_renamed.columns:
+            forecast_renamed = forecast_renamed.rename({'LSTM': 'Fcst Ensemble Rev'})
+        else:
+            # Use the first available forecast column or create a default one
+            forecast_cols = [col for col in forecast_renamed.columns if col not in ['unique_id', 'sales_date']]
+            if forecast_cols:
+                forecast_renamed = forecast_renamed.rename({forecast_cols[0]: 'Fcst Ensemble Rev'})
+            else:
+                forecast_renamed = forecast_renamed.with_columns(pl.lit(0.0).alias('Fcst Ensemble Rev'))
         
         # Merge forecasts with original data
         # This will add forecast columns to future dates
         merged_df = original_df.join(
             forecast_renamed,
-            on=['unique_id', 'SALES_DATE'],
+            on=['unique_id', 'sales_date'],
             how='outer',
             coalesce=True
         )
@@ -515,22 +699,50 @@ def filter_last_36_months(df: pl.DataFrame) -> pl.DataFrame:
     else:
         # Simple fallback filter with timezone-safe comparison
         cutoff_date = datetime.today() - relativedelta(months=36)
-        return df.filter(pl.col('SALES_DATE').dt.date() >= cutoff_date.date())
+        return df.filter(pl.col('sales_date').dt.date() >= cutoff_date.date())
 
 def prepare_data1(df: pl.DataFrame) -> pl.DataFrame:
     """Prepare data for training"""
+    # Ensure consistent unique_id creation
+    if 'unique_id' not in df.columns:
+        if 'item_skey' in df.columns and 'location_skey' in df.columns:
+            df = df.with_columns(
+                (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+            )
+        else:
+            # Fallback to country and catalog_number if available
+            if 'Country' in df.columns and 'CatalogNumber' in df.columns:
+                df = df.with_columns(
+                    (pl.col('Country') + "," + pl.col('CatalogNumber')).alias('unique_id')
+                )
+            else:
+                # Last resort: create a generic unique_id
+                df = df.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
+    
     if DataCleaner is not None:
+        # Ensure SALES_DATE is converted to sales_date before passing to DataCleaner
+        if 'SALES_DATE' in df.columns:
+            df = df.rename({'SALES_DATE': 'sales_date'})
+            print("DEBUG: Renamed 'SALES_DATE' to 'sales_date' in prepare_data1 for DataCleaner.")
         return DataCleaner.prepare_training_data(df)
     else:
         # Simple fallback preparation with proper date handling
         try:
-            # Ensure SALES_DATE is datetime before filtering
+            # Ensure SALES_DATE is converted to sales_date for fallback logic
             if 'SALES_DATE' in df.columns:
+                df = df.rename({'SALES_DATE': 'sales_date'})
+                print("DEBUG: Renamed 'SALES_DATE' to 'sales_date' in prepare_data1 fallback.")
+
+            # Define last_full_month for filtering
+            last_full_month = datetime.today() - relativedelta(months=1)
+            
+            # Ensure sales_date is datetime before filtering
+            if 'sales_date' in df.columns:
                 df = df.with_columns(
-                    pl.col('SALES_DATE').cast(pl.Datetime).alias('SALES_DATE')
+                    pl.col('sales_date').cast(pl.Datetime).alias('sales_date')
                 )
             
-            return df.fill_null(0).filter(pl.col('SALES_DATE').dt.date() <= last_full_month.date())
+            return df.fill_null(0).filter(pl.col('sales_date').dt.date() <= last_full_month.date())
         except Exception as date_error:
             print(f"Error in prepare_data1 date filtering: {date_error}")
             # If date filtering fails, just return the data without filtering
@@ -588,7 +800,7 @@ def apply_filters(filters, state: DataState = None):
                 level_col = filters['level']
 
             if level_col in df.columns:
-                group_cols = ['SALES_DATE', level_col]
+                group_cols = ['sales_date', level_col]
                 if filters.get('location1') and filters.get('location1') != 'level':
                     location_col = filters['location1']
                     if location_col in df.columns:
@@ -630,23 +842,44 @@ def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -
     if state is None:
         state = get_global_state()
     
+    # Ensure unique_id is created consistently using item_skey and location_skey
     if 'unique_id' not in df.columns:
-        df = df.with_columns(unique_id = pl.col('Country') + "," + pl.col('CatalogNumber'))
-    df = df.drop('cluster', strict=False)
-    df = df.drop('cluster_right', strict=False)
-    df1 = df.filter(pl.col('SALES_DATE').dt.date() <= (datetime.today() - relativedelta(months=1)).date())
-    df1 = df1[['unique_id', 'SALES_DATE', 'Act Orders Rev']]
-    df1 = df1.with_columns(pl.col('Act Orders Rev').cast(pl.Float32).alias('Act Orders Rev'))
-    df1 = df1.with_columns(ynorm=((pl.col('Act Orders Rev')-pl.col('Act Orders Rev').mean()) / pl.col('Act Orders Rev').std()).over('unique_id'))
+        if 'item_skey' in df.columns and 'location_skey' in df.columns:
+            df = df.with_columns(
+                (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+            )
+        else:
+            # Fallback to country and catalog_number if available
+            if 'Country' in df.columns and 'CatalogNumber' in df.columns:
+                df = df.with_columns(
+                    (pl.col('Country') + "," + pl.col('CatalogNumber')).alias('unique_id')
+                )
+            else:
+                # Last resort: create a generic unique_id
+                df = df.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
+    
+    # Remove existing cluster columns
+    df = df.drop(['cluster', 'cluster_right'], strict=False)
+    
+    # Filter to training data
+    df1 = df.filter(pl.col('sales_date').dt.date() <= (datetime.today() - relativedelta(months=1)).date())
+    df1 = df1[['unique_id', 'sales_date', 'act_orders_rev']]
+    df1 = df1.with_columns(pl.col('act_orders_rev').cast(pl.Float32).alias('act_orders_rev'))
+    df1 = df1.with_columns(ynorm=((pl.col('act_orders_rev')-pl.col('act_orders_rev').mean()) / pl.col('act_orders_rev').std()).over('unique_id'))
     df1 = df1.fill_nan(0)
     df1 = df1.with_columns(pl.when(pl.col('ynorm').is_infinite()).then(0).otherwise(pl.col('ynorm')).alias('ynorm'))
-    df1 = df1.pivot(index='unique_id', on='SALES_DATE', values='ynorm', aggregate_function='sum')
-    bi = Birch(n_clusters=6).fit(df1[:, 1:])
-    df1 = df1.with_columns(cluster=bi.labels_)
-    df1 = df1['unique_id', 'cluster']
-    df = df.join(df1, on='unique_id', how='left', coalesce=True)
-    df = df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
-    df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
+    df1 = df1.pivot(index='unique_id', on='sales_date', values='ynorm', aggregate_function='sum')
+    
+    if len(df1) > 1:  # Need at least 2 points for clustering
+        bi = Birch(n_clusters=6).fit(df1[:, 1:])
+        df1 = df1.with_columns(cluster=bi.labels_)
+        df1 = df1[['unique_id', 'cluster']]
+        df = df.join(df1, on='unique_id', how='left', coalesce=True)
+        df = df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
+        df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
+    else:
+        # Not enough data for clustering, assign all to cluster 0
+        df = df.with_columns(cluster=pl.lit("0"))
     
     # Save clusters to database instead of parquet
     db_service = DatabaseUtils.get_database_service()
@@ -661,6 +894,17 @@ def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -
 def _create_simple_forecasts(df_fr: pl.DataFrame) -> pl.DataFrame:
     """Simple NHITS forecasting fallback"""
     try:
+        # Ensure unique_id is created consistently if not already present
+        if 'unique_id' not in df_fr.columns:
+            try:
+                df_fr = df_fr.with_columns(
+                    (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+                )
+                print(f"DEBUG: Created unique_id in _create_simple_forecasts using item_skey and location_skey. Sample: {df_fr['unique_id'].head(5).to_list()}")
+            except Exception as unique_id_error:
+                print(f"Error creating unique_id in _create_simple_forecasts: {unique_id_error}")
+                df_fr = df_fr.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
+
         # Simple NHITS model for each cluster
         forecasts = []
         

@@ -11,6 +11,11 @@ from datetime import datetime, timedelta
 import json
 import re
 
+# Global variables for UI components
+chart_components = None
+details_table = None
+details_container = None
+
 def clean_markdown_content(content: str) -> str:
     """
     Clean and normalize markdown content to fix formatting issues.
@@ -497,6 +502,7 @@ def create_dashboard():
         # Main content area
         with ui.row().classes('w-full mt-2 ml-0 gap-2'):
             # Create chart components
+            global chart_components, details_table, details_container
             chart_components = ChartComponents()
             chart_components.create_charts_row()
             
@@ -561,25 +567,35 @@ def raw_data_page():
         WHERE ff.is_current = TRUE
         ORDER BY ff.forecast_date DESC, ff.item_skey, ff.location_skey
     """
-    forecast_query1 = """
-            SELECT 
-                item_skey, 
-                location_skey, 
-                forecast_date, 
-                forecast_horizon, 
-                forecast_value, 
-                model_type
-            FROM da.forecasts 
-            WHERE 1=1
-            """ + (
-                f" AND location_skey IN (SELECT location_skey FROM da.location_hierarchy WHERE {column_mapping.get(current_filters.get('location1', 'country'))} = '{current_filters.get('location2', '')}')"
-                if current_filters.get('location1') and current_filters.get('location2') else ""
-            ) + (
-                f" AND item_skey IN (SELECT demantra_item_skey FROM da.product_hierarchy WHERE {column_mapping.get(current_filters.get('product1', 'franchise'))} = '{current_filters.get('product2', '')}')"
-                if current_filters.get('product1') and current_filters.get('product2') else ""
-            ) + """
-            ORDER BY forecast_date DESC
-            """
+    # Build WHERE conditions for forecast query using the same approach as sales data
+    where_conditions = []
+    
+    if current_filters.get('location1') and current_filters.get('location2'):
+        db_location_col = column_mapping.get(current_filters.get('location1'), current_filters.get('location1', '').lower().replace(' ', '_'))
+        where_conditions.append(f"lh.{db_location_col} = '{current_filters.get('location2', '')}'")
+    
+    if current_filters.get('product1') and current_filters.get('product2'):
+        db_product_col = column_mapping.get(current_filters.get('product1'), current_filters.get('product1', '').lower().replace(' ', '_'))
+        where_conditions.append(f"ph.{db_product_col} = '{current_filters.get('product2', '')}'")
+    
+    where_clause = " AND ".join(where_conditions) if where_conditions else ""
+    
+    # Updated forecast query to use the same hierarchy tables as sales data for proper filtering
+    # Fixed ambiguous column references by using table aliases
+    forecast_query1 = f"""
+        SELECT
+            f.item_skey,
+            f.location_skey,
+            f.forecast_date,
+            f.forecast_horizon,
+            f.forecast_value,
+            f.model_type
+        FROM da.forecasts f
+        JOIN da.product_hierarchy ph ON f.item_skey = ph.demantra_item_skey
+        JOIN da.location_hierarchy lh ON f.location_skey = lh.location_skey
+        {"WHERE " + where_clause if where_clause else ""}
+        ORDER BY f.forecast_date DESC
+    """
     user_id = app.storage.user.get('user_id', 'system')
     forecast_result = db_service.execute_query(forecast_query1, user_id=user_id)
     sales_df = db_service.get_filtered_sales_actuals(
@@ -596,14 +612,24 @@ def raw_data_page():
 
     # Perform join if both datasets exist
     if sales_df is not None and forecast_df is not None:
-        # For sales data: use item_skey and country (or region/area)
+        # For sales data: use item_skey and location_skey consistently
+        # Ensure consistent data types for unique_id creation
+        sales_df = sales_df.with_columns([
+            pl.col('item_skey').cast(pl.Int64).alias('item_skey'),
+            pl.col('location_skey').cast(pl.Int64).alias('location_skey')
+        ])
         sales_df = sales_df.with_columns(
             (pl.col('item_skey').cast(pl.Utf8) + '_' + 
                 pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
         )
         print(f"DEBUG: Created unique_id for sales using item_skey + location_skey")
         
-        # For forecast data: use item_skey and location_skey
+        # For forecast data: use item_skey and location_skey consistently
+        # Ensure consistent data types for unique_id creation
+        forecast_df = forecast_df.with_columns([
+            pl.col('item_skey').cast(pl.Int64).alias('item_skey'),
+            pl.col('location_skey').cast(pl.Int64).alias('location_skey')
+        ])
         forecast_df = forecast_df.with_columns(
             (pl.col('item_skey').cast(pl.Utf8) + '_' + 
                 pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')

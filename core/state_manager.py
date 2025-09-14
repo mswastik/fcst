@@ -206,9 +206,15 @@ class DataState:
         }
     
     def update_filtered_data(self, new_filtered_df: pl.DataFrame) -> None:
-        """Update the filtered dataframe and related state."""
-        self.filtered_df = new_filtered_df
-        
+        """Update the filtered DataFrame and apply necessary transformations."""
+        if new_filtered_df is not None:
+            # Apply data preparation for UI before storing
+            self.filtered_df = DataUtils.prepare_data_for_ui(new_filtered_df)
+            print("DEBUG: Filtered data updated and prepared for UI.")
+        else:
+            self.filtered_df = None
+            print("DEBUG: Filtered data set to None.")
+
         # Update filtered products and models based on new data
         if new_filtered_df is not None and len(new_filtered_df) > 0:
             try:

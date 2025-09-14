@@ -103,8 +103,16 @@ class ForecastProcessor:
         """Process a single cluster and generate forecasts."""
         print(f"Processing cluster {cluster_id} with {len(cluster_data['unique_id'].unique())} series")
         
-        # Prepare data
-        cluster_data = cluster_data[['unique_id', 'ds', 'y']]
+        # Prepare data - ensure item_skey and location_skey are retained
+        # for consistent unique_id generation later if needed.
+        # Also, ensure 'ds' and 'y' are present for forecasting models.
+        required_cols = ['unique_id', 'ds', 'y']
+        if 'item_skey' in cluster_data.columns:
+            required_cols.append('item_skey')
+        if 'location_skey' in cluster_data.columns:
+            required_cols.append('location_skey')
+
+        cluster_data = cluster_data[required_cols]
         n_series = len(cluster_data['unique_id'].unique())
         batch_size, windows_batch_size = self.config.calculate_batch_sizes(n_series)
         

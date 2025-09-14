@@ -16,8 +16,8 @@ class DataCleaner:
         """Prepare data with proper handling of missing values and outliers."""
         # Remove outliers using IQR method
         df = df.with_columns(
-            q1=pl.col('Act Orders Rev').quantile(0.25).over('unique_id'),
-            q3=pl.col('Act Orders Rev').quantile(0.75).over('unique_id')
+            q1=pl.col('act_orders_rev').quantile(0.25).over('unique_id'),
+            q3=pl.col('act_orders_rev').quantile(0.75).over('unique_id')
         )
         df = df.with_columns(iqr=pl.col('q3') - pl.col('q1'))
         df = df.with_columns(lower_bound=pl.col('q1') - 1.5 * pl.col('iqr'))
@@ -25,12 +25,12 @@ class DataCleaner:
         
         # Cap outliers instead of removing them
         df = df.with_columns(
-            pl.when(pl.col('Act Orders Rev') < pl.col('lower_bound'))
+            pl.when(pl.col('act_orders_rev') < pl.col('lower_bound'))
             .then(pl.col('lower_bound'))
-            .when(pl.col('Act Orders Rev') > pl.col('upper_bound'))
+            .when(pl.col('act_orders_rev') > pl.col('upper_bound'))
             .then(pl.col('upper_bound'))
-            .otherwise(pl.col('Act Orders Rev'))
-            .alias('Act Orders Rev')
+            .otherwise(pl.col('act_orders_rev'))
+            .alias('act_orders_rev')
         )
         
         return df.drop(['q1', 'q3', 'iqr', 'lower_bound', 'upper_bound'])
@@ -43,8 +43,8 @@ class DataCleaner:
         start_date = last_full_month - relativedelta(months=months-1)
         
         return df.filter(
-            (pl.col('SALES_DATE').dt.date() >= start_date.date()) &
-            (pl.col('SALES_DATE').dt.date() <= last_full_month.date())
+            (pl.col('sales_date').dt.date() >= start_date.date()) &
+            (pl.col('sales_date').dt.date() <= last_full_month.date())
         )
     
     @staticmethod
@@ -63,7 +63,7 @@ class DataCleaner:
         # Add unique_id if not present
         if 'unique_id' not in clean_df.columns:
             clean_df = clean_df.with_columns(
-                unique_id=pl.col('Country') + "," + pl.col('CatalogNumber')
+                unique_id=pl.col('country') + "," + pl.col('catalog_number')
             )
         
         return DataCleaner.filter_last_n_months(clean_df)
@@ -82,7 +82,7 @@ class ForecastDataProcessor:
             return None
         
         # Rename columns and split unique_id
-        forecasts = forecasts.rename({'ds': 'SALES_DATE'})
+        forecasts = forecasts.rename({'ds': 'sales_date'})
         forecasts = self._split_unique_id(forecasts)
         
         # Join with hierarchy data
@@ -93,7 +93,7 @@ class ForecastDataProcessor:
                          'Region', 'Business Sector', 'Business Unit', 'Franchise', 
                          'Product Line', 'IBP Level 5', 'IBP Level 6', 'IBP Level 7']
         model_cols = [col for col in forecasts.columns 
-                     if col not in ['unique_id', 'SALES_DATE'] + hierarchy_cols]
+                     if col not in ['unique_id', 'sales_date'] + hierarchy_cols]
         
         # Add missing model columns to original data
         if 'NHITS' not in original_df.columns:
@@ -133,7 +133,7 @@ class ForecastDataProcessor:
         """Merge forecasts with original dataframe."""
         # Define potential join columns
         potential_join_columns = [
-            'SALES_DATE', 'CatalogNumber', 'Country', 'Area', 'Stryker Group Region', 
+            'sales_date', 'CatalogNumber', 'Country', 'Area', 'Stryker Group Region', 
             'Region', 'Business Sector', 'Business Unit', 'Franchise', 'Product Line', 
             'IBP Level 5', 'IBP Level 6', 'IBP Level 7', 'unique_id'
         ]

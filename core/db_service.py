@@ -554,8 +554,8 @@ class DatabaseService:
 
         logger.info("DataFrame prepared for insertion")
 
-        # Prepare data for insertion
-        logger.info("Starting data preparation for insertion...")
+        # Prepare data for insertion - batch process to improve performance
+        logger.info("Starting batch data preparation for insertion...")
         records_to_insert = []
         skipped_count = 0
         total_records = len(forecast_df)
@@ -565,68 +565,127 @@ class DatabaseService:
         use_direct_skeys = 'item_skey' in forecast_df.columns and 'location_skey' in forecast_df.columns
         logger.info(f"Using direct skeys: {use_direct_skeys}")
 
-        for i, row in enumerate(forecast_df.iter_rows(named=True)):
-            if i % 10 == 0:  # Log progress every 10 records
-                logger.info(f"Processing record {i+1}/{total_records}")
-
-            if use_direct_skeys:
-                # Use item_skey and location_skey directly from the dataframe
-                item_skey = row.get('item_skey')
-                location_skey = row.get('location_skey')
-
-                if item_skey is None or location_skey is None:
-                    logger.warning(f"Skipping row due to missing item_skey or location_skey: {row}")
-                    skipped_count += 1
-                    continue
+        if use_direct_skeys:
+            # Process all records at once when skeys are available directly
+            logger.info("Processing records with direct skeys...")
+            
+            # Get all required columns
+            unique_ids = forecast_df['unique_id'].to_list() if 'unique_id' in forecast_df.columns else [None] * len(forecast_df)
+            item_skeys = forecast_df['item_skey'].to_list()
+            location_skeys = forecast_df['location_skey'].to_list()
+            forecast_dates = forecast_df['forecast_date'].to_list()
+            
+            # Handle different possible forecast value columns
+            forecast_value_col = None
+            possible_forecast_cols = ['Fcst Ensemble Rev', 'ensemble', 'NHITS', 'LSTM', 'AutoARIMA', 'AutoETS', 'SeasonalNaive']
+            for col in possible_forecast_cols:
+                if col in forecast_df.columns:
+                    forecast_value_col = col
+                    break
+            
+            if forecast_value_col:
+                forecast_values = forecast_df[forecast_value_col].to_list()
             else:
-                # Parse unique_id in Country,CatalogNumber format
-                unique_id = row.get('unique_id')
+                # Fallback if no forecast column is found
+                forecast_values = [0.0] * len(forecast_df)
+            
+            # Get optional columns
+            confidence_lower = forecast_df['confidence_lower'].to_list() if 'confidence_lower' in forecast_df.columns else [None] * len(forecast_df)
+            confidence_upper = forecast_df['confidence_upper'].to_list() if 'confidence_upper' in forecast_df.columns else [None] * len(forecast_df)
+            model_versions = forecast_df['model_version'].to_list() if 'model_version' in forecast_df.columns else ['1.0'] * len(forecast_df)
+
+            # Process all records in a vectorized way
+            for i in range(len(forecast_df)):
+                if item_skeys[i] is None or location_skeys[i] is None:
+                    logger.warning(f"Skipping row {i} due to missing item_skey or location_skey: item_skey={item_skeys[i]}, location_skey={location_skeys[i]}")
+                    skipped_count += 1
+                    continue
+                
+                # Generate a unique forecast_id
+                forecast_id = uuid.uuid4().int & (1<<63)-1  # Generate a 63-bit integer UUID
+
+                records_to_insert.append({
+                    'forecast_id': forecast_id,
+                    'item_skey': item_skeys[i],
+                    'location_skey': location_skeys[i],
+                    'forecast_date': forecast_dates[i].strftime('%Y-%m-%d'),  # Format date for SQL
+                    'forecast_horizon': 1,  # Assuming horizon of 1 for all records for now
+                    'model_type': model_type,
+                    'forecast_value': forecast_values[i],
+                    'confidence_lower': confidence_lower[i],
+                    'confidence_upper': confidence_upper[i],
+                    'model_version': model_versions[i]
+                })
+        else:
+            # Process records individually when we need to extract skeys from unique_id
+            logger.info("Processing records by extracting skeys from unique_id...")
+            
+            # Extract all unique_id values and process them in batch where possible
+            unique_ids = forecast_df['unique_id'].to_list()
+            
+            # For unique_ids in item_skey_location_skey format, extract directly without database calls
+            for i, unique_id in enumerate(unique_ids):
+                if i % 100 == 0:  # Log progress every 100 records
+                    logger.info(f"Processing record {i+1}/{total_records}")
+
                 if not unique_id:
-                    logger.warning(f"Skipping row due to missing unique_id: {row}")
+                    logger.warning(f"Skipping row {i} due to missing unique_id")
                     skipped_count += 1
                     continue
 
-                logger.debug(f"Getting skeys for unique_id: {unique_id}")
-                item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
+                # Try to extract item_skey and location_skey directly from unique_id format
+                item_skey = None
+                location_skey = None
+                
+                try:
+                    # Check if unique_id is in item_skey_location_skey format
+                    if '_' in unique_id:
+                        parts = unique_id.split('_', 1)  # Split only on first underscore
+                        if len(parts) == 2:
+                            item_skey = int(parts[0])
+                            location_skey = int(parts[1])
+                    elif ',' in unique_id:  # Country,CatalogNumber format
+                        # For this format, we need to query the database as before
+                        logger.debug(f"Getting skeys for unique_id: {unique_id}")
+                        item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
+                except ValueError:
+                    # If conversion fails, try the database lookup method
+                    logger.debug(f"Getting skeys for unique_id: {unique_id}")
+                    item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
 
                 if item_skey is None or location_skey is None:
                     logger.warning(f"Could not find s_keys for unique_id: {unique_id}. Item_skey: {item_skey}, Location_skey: {location_skey}. Skipping row.")
                     skipped_count += 1
                     continue
 
-            # Extract forecast value - assuming 'Fcst Ensemble Rev' or 'ensemble' or similar
-            forecast_value = (row.get('Fcst Ensemble Rev', 0.0) or
-                            row.get('ensemble', 0.0) or
-                            row.get('NHITS', 0.0) or
-                            row.get('LSTM', 0.0) or
-                            row.get('AutoARIMA', 0.0) or
-                            row.get('AutoETS', 0.0) or
-                            row.get('SeasonalNaive', 0.0)) # Fallback to any available forecast column
+                # Extract forecast value for this row
+                row = forecast_df.row(i, named=True)
+                forecast_value = (row.get('Fcst Ensemble Rev', 0.0) or
+                                row.get('ensemble', 0.0) or
+                                row.get('NHITS', 0.0) or
+                                row.get('LSTM', 0.0) or
+                                row.get('AutoARIMA', 0.0) or
+                                row.get('AutoETS', 0.0) or
+                                row.get('SeasonalNaive', 0.0))
 
-            # Determine forecast horizon (months ahead from last actual date)
-            # This is a simplification; a more robust solution would compare to the last actual sales date
-            forecast_date = row['forecast_date']
+                # Determine forecast horizon (same simplification as before)
+                forecast_date = row['forecast_date']
 
-            # Placeholder for horizon - assuming 1 for now, needs actual calculation
-            # For simplicity, let's assume horizon is 1 for all forecasts for now
-            # A more accurate horizon would require knowing the last actual sales date
-            forecast_horizon = 1
+                # Generate a unique forecast_id
+                forecast_id = uuid.uuid4().int & (1<<63)-1  # Generate a 63-bit integer UUID
 
-            # Generate a unique forecast_id
-            forecast_id = uuid.uuid4().int & (1<<63)-1 # Generate a 63-bit integer UUID
-
-            records_to_insert.append({
-                'forecast_id': forecast_id,
-                'item_skey': item_skey,
-                'location_skey': location_skey,
-                'forecast_date': forecast_date.strftime('%Y-%m-%d'), # Format date for SQL
-                'forecast_horizon': forecast_horizon,
-                'model_type': model_type,
-                'forecast_value': forecast_value,
-                'confidence_lower': row.get('confidence_lower'), # Assuming these exist if provided
-                'confidence_upper': row.get('confidence_upper'),
-                'model_version': row.get('model_version', '1.0')
-            })
+                records_to_insert.append({
+                    'forecast_id': forecast_id,
+                    'item_skey': item_skey,
+                    'location_skey': location_skey,
+                    'forecast_date': forecast_date.strftime('%Y-%m-%d'),  # Format date for SQL
+                    'forecast_horizon': 1,  # Assuming horizon of 1 for all records for now
+                    'model_type': model_type,
+                    'forecast_value': forecast_value,
+                    'confidence_lower': row.get('confidence_lower'),
+                    'confidence_upper': row.get('confidence_upper'),
+                    'model_version': row.get('model_version', '1.0')
+                })
 
         if not records_to_insert:
             logger.warning(f"No valid records to insert after processing. Skipped {skipped_count} records.")
@@ -634,59 +693,62 @@ class DatabaseService:
 
         logger.info(f"Prepared {len(records_to_insert)} records for insertion")
 
-        # Convert to Polars DataFrame for batch insertion
-        insert_df = pl.DataFrame(records_to_insert)
-        logger.info(f"Converted to insert DataFrame with {len(insert_df)} rows")
+        if not records_to_insert:
+            logger.warning(f"No valid records to insert after processing. Skipped {skipped_count} records.")
+            return 0
 
-        # Construct INSERT statement
-        columns = ", ".join(insert_df.columns)
-        placeholders = ", ".join(["?" for _ in insert_df.columns])
-        insert_query = f"INSERT INTO da.forecasts ({columns}) VALUES ({placeholders})"
-        logger.info(f"Insert query prepared: {insert_query}")
+        logger.info(f"Prepared {len(records_to_insert)} records for insertion")
 
         cursor = conn.cursor()
         # Set a timeout for the cursor operations
         logger.info("Database cursor created")
         
-        inserted_count = 0
         try:
-            logger.info(f"Starting batch insertion of {len(insert_df)} records...")
-            # Execute in batches to improve performance
-            batch_size = 100  # Process in batches of 100
-            total_rows = len(insert_df)
+            # Execute in larger batches to improve performance
+            batch_size = 1000  # Increase batch size for better performance
+            total_records = len(records_to_insert)
+            inserted_count = 0
             
-            for i in range(0, total_rows, batch_size):
-                batch_end = min(i + batch_size, total_rows)
-                batch_data = insert_df.slice(i, batch_end - i)
+            logger.info(f"Starting batch insertion of {total_records} records with batch size {batch_size}")
+            
+            for i in range(0, total_records, batch_size):
+                batch_end = min(i + batch_size, total_records)
+                batch = records_to_insert[i:batch_end]
                 
-                if i % 100 == 0:  # Log progress every 100 records
-                    logger.info(f"Inserting records {i+1} to {batch_end} of {total_rows}")
+                if i % 1000 == 0:  # Log progress every 1000 records
+                    logger.info(f"Inserting records {i+1} to {batch_end} of {total_records}")
                 
-                # Construct batch INSERT statement
-                placeholders = ", ".join(["?" for _ in batch_data.columns])
-                insert_query = f"INSERT INTO da.forecasts ({columns}) VALUES ({placeholders})"
+                # Prepare the batch INSERT statement
+                columns = list(batch[0].keys())
+                columns_str = ", ".join(columns)
+                placeholders_str = ", ".join(["?" for _ in columns])
+                insert_query = f"INSERT INTO da.forecasts ({columns_str}) VALUES ({placeholders_str})"
                 
-                # Execute batch insert
-                for row_data in batch_data.iter_rows():
-                    # Convert Polars Series values to Python types for Databricks compatibility
-                    python_row_data = []
-                    for value in row_data:
-                        if hasattr(value, 'item') and len(value) == 1:  # Polars Series with single element
-                            python_row_data.append(value.item())
-                        elif hasattr(value, 'to_list') and len(value) > 1:  # Polars Series with multiple elements
-                            # For Series with multiple elements, take the first value
-                            python_row_data.append(value[0])
-                        elif hasattr(value, 'item'):  # Other Polars objects
-                            try:
-                                python_row_data.append(value.item())
-                            except ValueError:
-                                # If .item() fails, try to get the first element
-                                python_row_data.append(value[0] if len(value) > 0 else None)
+                # Prepare batch values - convert each record to tuple in the correct order
+                batch_values = []
+                for record in batch:
+                    # Ensure values are in the same order as columns
+                    values = []
+                    for col in columns:
+                        value = record[col]
+                        # Handle datetime conversion if needed
+                        if isinstance(value, str) and 'date' in col.lower():
+                            # Already formatted as string in correct format
+                            values.append(value)
                         else:
-                            python_row_data.append(value)
-                    
-                    cursor.execute(insert_query, tuple(python_row_data))
-                    inserted_count += 1
+                            # Convert Polars Series values to Python types for Databricks compatibility
+                            if hasattr(value, 'item'):
+                                try:
+                                    values.append(value.item())
+                                except (ValueError, AttributeError):
+                                    values.append(value if not hasattr(value, '__len__') or len(value) == 0 else value[0])
+                            else:
+                                values.append(value)
+                    batch_values.append(tuple(values))
+                
+                # Execute batch insert with executemany for better performance
+                cursor.executemany(insert_query, batch_values)
+                inserted_count += len(batch_values)
                     
             logger.info(f"Successfully inserted {inserted_count} forecast records into da.forecasts. Skipped {skipped_count} records.")
         except Exception as e:

@@ -611,117 +611,223 @@ def raw_data_page():
     forecast_df = forecast_df.with_columns(pl.lit('forecast').alias('data_type'))
 
     # Perform join if both datasets exist
-    if sales_df is not None and forecast_df is not None:
-        # For sales data: use item_skey and location_skey consistently
-        # Ensure consistent data types for unique_id creation
-        sales_df = sales_df.with_columns([
-            pl.col('item_skey').cast(pl.Int64).alias('item_skey'),
-            pl.col('location_skey').cast(pl.Int64).alias('location_skey')
-        ])
-        sales_df = sales_df.with_columns(
-            (pl.col('item_skey').cast(pl.Utf8) + '_' + 
-                pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-        )
-        print(f"DEBUG: Created unique_id for sales using item_skey + location_skey")
-        
-        # For forecast data: use item_skey and location_skey consistently
-        # Ensure consistent data types for unique_id creation
-        forecast_df = forecast_df.with_columns([
-            pl.col('item_skey').cast(pl.Int64).alias('item_skey'),
-            pl.col('location_skey').cast(pl.Int64).alias('location_skey')
-        ])
-        forecast_df = forecast_df.with_columns(
-            (pl.col('item_skey').cast(pl.Utf8) + '_' + 
-                pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-        )
-        
-        print(f"DEBUG: Sales unique_ids sample: {sales_df['unique_id'].head(5).to_list()}")
-        print(f"DEBUG: Forecast unique_ids sample: {forecast_df['unique_id'].head(5).to_list()}")
-        
-        # Debug: Check if there are any matching unique_ids
-        sales_unique_ids = set(sales_df['unique_id'].unique().to_list())
-        forecast_unique_ids = set(forecast_df['unique_id'].unique().to_list())
-        matching_ids = sales_unique_ids.intersection(forecast_unique_ids)
-        print(f"DEBUG: Number of matching unique_ids: {len(matching_ids)}")
-        if len(matching_ids) > 0:
-            print(f"DEBUG: Sample matching IDs: {list(matching_ids)[:3]}")
-        else:
-            print("DEBUG: No matching unique_ids found!")
+    try:
+        if sales_df is not None and forecast_df is not None:
+            # For sales data: use item_skey and location_skey consistently
+            # Ensure consistent data types for unique_id creation
+            sales_df = sales_df.with_columns([
+                pl.col('item_skey').cast(pl.Int64).alias('item_skey'),
+                pl.col('location_skey').cast(pl.Int64).alias('location_skey')
+            ])
+            sales_df = sales_df.with_columns(
+                (pl.col('item_skey').cast(pl.Utf8) + '_' + 
+                    pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+            )
+            print(f"DEBUG: Created unique_id for sales using item_skey + location_skey")
             
-        # Debug: Check raw values before unique_id creation
-        print(f"DEBUG: Sales item_skey sample: {sales_df['item_skey'].head(3).to_list()}")
-        print(f"DEBUG: Sales location_skey sample: {sales_df['location_skey'].head(3).to_list()}")
-        print(f"DEBUG: Forecast item_skey sample: {forecast_df['item_skey'].head(3).to_list()}")
-        print(f"DEBUG: Forecast location_skey sample: {forecast_df['location_skey'].head(3).to_list()}")
-        
-        # Left join to keep all sales data and add forecast where available
-        combined_df = sales_df.join(
-            forecast_df.select(['unique_id', 'join_date', 'forecast_value', 'model_type', 'forecast_horizon', 'data_type']),
-            on=['unique_id', 'join_date'],
-            how='left'
-        )
-        # Rename columns to match expected format in data.html
-        column_mapping = {
-            'act_orders_rev': 'Act Orders Rev',
-            'fcst_stat_final_rev': 'Fcst Stat Final Rev',
-            'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
-            'l2_stat_final_rev': 'L2 Stat Final Rev',
-            'fcst_df_final_rev': 'Fcst DF Final Rev',
-            'l2_df_final_rev': 'L2 DF Final Rev',
-            'act_orders_rev_val': 'Act Orders Rev Val',
-            'l1_df_final_rev': 'L1 DF Final Rev',
-            'l0_df_final_rev': 'L0 DF Final Rev',
-            'fcst_df_final_rev_val': 'Fcst DF Final Rev Val',
-            'sales_date': 'SALES_DATE',
-            'country': 'Country',
-            'region': 'Region',
-            'area': 'Area',
-            'selling_division': 'SellingDivision',
-            'stryker_group_region': 'StrykerGroupRegion',
-            'catalog_number': 'CatalogNumber',
-            'business_sector': 'Business Sector',
-            'business_unit': 'Business Unit',
-            'franchise': 'Franchise',
-            'product_line': 'Product Line',
-            'ibp_level_5': 'IBP Level 5',
-            'ibp_level_6': 'IBP Level 6',
-            'ibp_level_7': 'IBP Level 7',
-            'uom': 'UOM',
-            'pack_content': 'PackContent',
-            'model_type': 'model_type',
-            'forecast_horizon': 'forecast_horizon',
-            'forecast_value': 'forecast_value',
-            'data_type': 'data_type'
-        }
-        
-        print(f"Combined data shape after join: {combined_df.shape}")
-        print(f"Combined data columns: {combined_df.columns}")
-        combined_df=combined_df.rename(column_mapping)
-        combined_df=combined_df.with_columns(data_type=pl.when(pl.col('data_type')!='forecast').then(pl.lit('sales_actuals')).otherwise(pl.col('data_type')))
-        combined_data = combined_df.to_dicts()
-        
-        print(f"DEBUG: Sample of combined data: {combined_df}")
+            # For forecast data: use item_skey and location_skey consistently
+            # Ensure consistent data types for unique_id creation
+            forecast_df = forecast_df.with_columns([
+                pl.col('item_skey').cast(pl.Int64).alias('item_skey'),
+                pl.col('location_skey').cast(pl.Int64).alias('location_skey')
+            ])
+            forecast_df = forecast_df.with_columns(
+                (pl.col('item_skey').cast(pl.Utf8) + '_' + 
+                    pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
+            )
+            
+            print(f"DEBUG: Sales unique_ids sample: {sales_df['unique_id'].head(5).to_list()}")
+            print(f"DEBUG: Forecast unique_ids sample: {forecast_df['unique_id'].head(5).to_list()}")
+            
+            # Debug: Check if there are any matching unique_ids
+            sales_unique_ids = set(sales_df['unique_id'].unique().to_list())
+            forecast_unique_ids = set(forecast_df['unique_id'].unique().to_list())
+            matching_ids = sales_unique_ids.intersection(forecast_unique_ids)
+            print(f"DEBUG: Number of matching unique_ids: {len(matching_ids)}")
+            if len(matching_ids) > 0:
+                print(f"DEBUG: Sample matching IDs: {list(matching_ids)[:3]}")
+            else:
+                print("DEBUG: No matching unique_ids found!")
+                
+            # Debug: Check raw values before unique_id creation
+            print(f"DEBUG: Sales item_skey sample: {sales_df['item_skey'].head(3).to_list()}")
+            print(f"DEBUG: Sales location_skey sample: {sales_df['location_skey'].head(3).to_list()}")
+            print(f"DEBUG: Forecast item_skey sample: {forecast_df['item_skey'].head(3).to_list()}")
+            print(f"DEBUG: Forecast location_skey sample: {forecast_df['location_skey'].head(3).to_list()}")
+            
+            # Instead of a simple left join that duplicates rows when multiple forecasts exist,
+            # we need to pivot the forecast data to have separate columns for each model type
+            # First, let's separate the dataframes
+            sales_data_for_combined = sales_df.clone()
+            
+            # Rename columns to match expected format in data.html
+            column_mapping = {
+                'act_orders_rev': 'Act Orders Rev',
+                'fcst_stat_final_rev': 'Fcst Stat Final Rev',
+                'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
+                'l2_stat_final_rev': 'L2 Stat Final Rev',
+                'fcst_df_final_rev': 'Fcst DF Final Rev',
+                'l2_df_final_rev': 'L2 DF Final Rev',
+                'act_orders_rev_val': 'Act Orders Rev Val',
+                'l1_df_final_rev': 'L1 DF Final Rev',
+                'l0_df_final_rev': 'L0 DF Final Rev',
+                'fcst_df_final_rev_val': 'Fcst DF Final Rev Val',
+                'sales_date': 'SALES_DATE',
+                'country': 'Country',
+                'region': 'Region',
+                'area': 'Area',
+                'selling_division': 'SellingDivision',
+                'stryker_group_region': 'StrykerGroupRegion',
+                'catalog_number': 'CatalogNumber',
+                'business_sector': 'Business Sector',
+                'business_unit': 'Business Unit',
+                'franchise': 'Franchise',
+                'product_line': 'Product Line',
+                'ibp_level_5': 'IBP Level 5',
+                'ibp_level_6': 'IBP Level 6',
+                'ibp_level_7': 'IBP Level 7',
+                'uom': 'UOM',
+                'pack_content': 'PackContent'
+            }
+            
+            sales_data_for_combined = sales_data_for_combined.rename(column_mapping)
+            
+            # Add data_type column to sales data
+            sales_data_for_combined = sales_data_for_combined.with_columns(
+                pl.lit('sales_actuals').alias('data_type')
+            )
+            
+            # Get unique model types from forecast data
+            if len(forecast_df) > 0:
+                model_types = forecast_df['model_type'].unique().to_list()
+                print(f"DEBUG: Found model types: {model_types}")
+                
+                # Create separate forecast columns for each model type
+                forecast_data_expanded = forecast_df.clone()
+                
+                # Rename forecast columns to match expected format
+                forecast_data_expanded = forecast_data_expanded.rename({
+                    'forecast_value': 'forecast_value',
+                    'model_type': 'model_type',
+                    'forecast_horizon': 'forecast_horizon'
+                })
+                
+                # Pivot the forecast data to have separate columns for each model
+                forecast_pivoted = forecast_data_expanded.pivot(
+                    values='forecast_value',
+                    index=['unique_id', 'join_date'],
+                    on='model_type',
+                    aggregate_function='first'  # Use first value if there are duplicates
+                )
+                
+                # Rename the pivoted columns to include 'forecast_' prefix
+                rename_dict = {}
+                for col in forecast_pivoted.columns:
+                    if col not in ['unique_id', 'join_date']:
+                        rename_dict[col] = f'forecast_{col}'
+                forecast_pivoted = forecast_pivoted.rename(rename_dict)
+                
+                # Join sales data with pivoted forecast data
+                combined_df = sales_data_for_combined.join(
+                    forecast_pivoted,
+                    on=['unique_id', 'join_date'],
+                    how='left'
+                )
+            else:
+                # No forecast data, just use sales data
+                combined_df = sales_data_for_combined
+            
+            print(f"Combined data shape after join: {combined_df.shape}")
+            print(f"Combined data columns: {combined_df.columns}")
+            combined_data = combined_df.to_dicts()
+            
+            print(f"DEBUG: Sample of combined data: {combined_df}")
 
-    # Convert various types to JSON-serializable formats
-    def json_serial(obj):
-        from datetime import date, datetime
-        from decimal import Decimal
+        # Convert various types to JSON-serializable formats
+        def json_serial(obj):
+            from datetime import date, datetime
+            from decimal import Decimal
+            
+            if isinstance(obj, (date, datetime)):
+                return obj.isoformat()
+            elif isinstance(obj, Decimal):
+                return float(obj)
+            raise TypeError(f"Type {type(obj)} not serializable")
         
-        if isinstance(obj, (date, datetime)):
-            return obj.isoformat()
-        elif isinstance(obj, Decimal):
-            return float(obj)
-        raise TypeError(f"Type {type(obj)} not serializable")
-    
-    # Convert to JSON with custom serialization
-    combined_json = json.dumps(combined_data, default=json_serial) if combined_data else '[]'
+        # Convert to JSON with custom serialization
+        combined_json = json.dumps(combined_data, default=json_serial) if combined_data else '[]'
 
-    # Load HTML template with combined data
-    ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>')
-    ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>")
-    with open(Path(__file__).parent / 'data.html', 'r', encoding='utf-8') as f:
-        html_content = f.read()
-    ui.add_body_html(html_content.replace('{{df_json}}', combined_json))
+        # Load HTML template with combined data
+        ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>')
+        ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>")
+        with open(Path(__file__).parent / 'data.html', 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        ui.add_body_html(html_content.replace('{{df_json}}', combined_json))
+    except Exception as e:
+        print(f"Forecasting error: {str(e)}")
+        # Continue with just the sales data if forecast data processing fails
+        if sales_df is not None:
+            # Process just the sales data
+            column_mapping = {
+                'act_orders_rev': 'Act Orders Rev',
+                'fcst_stat_final_rev': 'Fcst Stat Final Rev',
+                'fcst_stat_prelim_rev': 'Fcst Stat Prelim Rev',
+                'l2_stat_final_rev': 'L2 Stat Final Rev',
+                'fcst_df_final_rev': 'Fcst DF Final Rev',
+                'l2_df_final_rev': 'L2 DF Final Rev',
+                'act_orders_rev_val': 'Act Orders Rev Val',
+                'l1_df_final_rev': 'L1 DF Final Rev',
+                'l0_df_final_rev': 'L0 DF Final Rev',
+                'fcst_df_final_rev_val': 'Fcst DF Final Rev Val',
+                'sales_date': 'SALES_DATE',
+                'country': 'Country',
+                'region': 'Region',
+                'area': 'Area',
+                'selling_division': 'SellingDivision',
+                'stryker_group_region': 'StrykerGroupRegion',
+                'catalog_number': 'CatalogNumber',
+                'business_sector': 'Business Sector',
+                'business_unit': 'Business Unit',
+                'franchise': 'Franchise',
+                'product_line': 'Product Line',
+                'ibp_level_5': 'IBP Level 5',
+                'ibp_level_6': 'IBP Level 6',
+                'ibp_level_7': 'IBP Level 7',
+                'uom': 'UOM',
+                'pack_content': 'PackContent'
+            }
+            
+            sales_df = sales_df.rename(column_mapping)
+            combined_data = sales_df.to_dicts()
+            
+            # Convert various types to JSON-serializable formats
+            def json_serial(obj):
+                from datetime import date, datetime
+                from decimal import Decimal
+                
+                if isinstance(obj, (date, datetime)):
+                    return obj.isoformat()
+                elif isinstance(obj, Decimal):
+                    return float(obj)
+                raise TypeError(f"Type {type(obj)} not serializable")
+            
+            # Convert to JSON with custom serialization
+            combined_json = json.dumps(combined_data, default=json_serial) if combined_data else '[]'
+
+            # Load HTML template with combined data
+            ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>')
+            ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>")
+            with open(Path(__file__).parent / 'data.html', 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            ui.add_body_html(html_content.replace('{{df_json}}', combined_json))
+        else:
+            # If no data at all, show empty page
+            combined_json = '[]'
+            ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>')
+            ui.add_head_html(f"<style>{(Path(__file__).parent / 'style.css').read_text()}</style>")
+            with open(Path(__file__).parent / 'data.html', 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            ui.add_body_html(html_content.replace('{{df_json}}', combined_json))
 
 
 @ui.page("/llms")
@@ -884,7 +990,7 @@ async def agent():
     #@run.io_bound
     def search_web(query, max_results=5):
         with DDGS() as ddgs:
-            return [r['href'] for r in ddgs.text(query, max_results=max_results,safesearch="on", backend="google")]
+            return [r['href'] for r in ddgs.text(query, max_results=max_results,safesearch="on", backend="google,brave")]
 
     #@run.cpu_bound
     def scrape_page(url):

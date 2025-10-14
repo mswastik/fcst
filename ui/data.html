@@ -1367,8 +1367,15 @@ function toggleSidebar(sidebarId) {
                         return pivotData.data[rowKey]['Total']?.[key] || 0;
                     });
                     
+                    // For forecast fields, use a more descriptive label
+                    let label = `${vf.field} (${vf.aggregation})`;
+                    if (vf.field.startsWith('forecast_')) {
+                        const modelName = vf.field.replace('forecast_', '');
+                        label = `${modelName} Forecast`;
+                    }
+                    
                     datasets.push({
-                        label: `${vf.field} (${vf.aggregation})`,
+                        label: label,
                         data: data,
                         backgroundColor: generateColors(pivotData.rowKeys.length, index),
                         borderColor: generateColors(pivotData.rowKeys.length, index, 0.8),
@@ -1383,8 +1390,15 @@ function toggleSidebar(sidebarId) {
                             return pivotData.data[rowKey]?.[colValue]?.[key] || 0;
                         });
                         
+                        // For forecast fields, use a more descriptive label
+                        let label = `${colValue} - ${vf.field} (${vf.aggregation})`;
+                        if (vf.field.startsWith('forecast_')) {
+                            const modelName = vf.field.replace('forecast_', '');
+                            label = `${colValue} - ${modelName} Forecast`;
+                        }
+                        
                         datasets.push({
-                            label: `${colValue} - ${vf.field} (${vf.aggregation})`,
+                            label: label,
                             data: data,
                             backgroundColor: generateColors(pivotData.columnValues.length * valueFields.length, colIndex * valueFields.length + valIndex, 0.7),
                             borderColor: generateColors(pivotData.columnValues.length * valueFields.length, colIndex * valueFields.length + valIndex, 1),
@@ -1707,7 +1721,21 @@ function toggleSidebar(sidebarId) {
                 }
 
                 // Select default value fields (include forecast values)
-                const defaultValueFields = ['Act Orders Rev', 'NHITS', 'Fcst Stat Final Rev', 'forecast_value'];
+                // We now have separate forecast columns for each model type
+                const defaultValueFields = ['Act Orders Rev'];
+                // Add all forecast columns dynamically
+                if (originalData && originalData.length > 0) {
+                    const firstRow = originalData[0];
+                    Object.keys(firstRow).forEach(key => {
+                        if (key.startsWith('forecast_')) {
+                            defaultValueFields.push(key);
+                        }
+                    });
+                }
+                // Fallback to some common forecast fields if no data is loaded yet
+                if (defaultValueFields.length === 1) {
+                    defaultValueFields.push('forecast_NHITS', 'forecast_Ensemble', 'forecast_AutoARIMA');
+                }
                 defaultValueFields.forEach(field => {
                     const valueOption = Array.from(valueFieldsSelect.options).find(opt => opt.value === field);
                     if (valueOption) {
@@ -1743,37 +1771,42 @@ function toggleSidebar(sidebarId) {
                 let forecastData = [];
 
                 if (currentData && currentData.length > 0) {
-                    // Filter for forecast data type
-                    forecastData = currentData.filter(item => item.data_type === 'forecast');
+                    // With our new pivoted data structure, we no longer have rows with data_type = 'forecast'
+                    // Instead, we have separate columns for each model's forecast values
+                    // Let's collect all forecast data by looking for columns that start with 'forecast_'
+                    const forecastColumns = [];
+                    const firstRow = currentData[0];
+                    Object.keys(firstRow).forEach(key => {
+                        if (key.startsWith('forecast_')) {
+                            forecastColumns.push(key);
+                        }
+                    });
+                    
+                    // Create a summary of forecast data for display
+                    forecastData = [];
+                    currentData.forEach(row => {
+                        forecastColumns.forEach(column => {
+                            if (row[column] !== undefined && row[column] !== null) {
+                                forecastData.push({
+                                    item_skey: row.item_skey || 'N/A',
+                                    location_skey: row.location_skey || 'N/A',
+                                    forecast_date: row.SALES_DATE || 'N/A',
+                                    forecast_horizon: 'N/A', // This information is not available in pivoted data
+                                    model_type: column.replace('forecast_', ''),
+                                    forecast_value: row[column],
+                                    is_current: true // All loaded forecasts are considered current
+                                });
+                            }
+                        });
+                    });
 
                     // Apply horizon and cycle filters if needed
-                    if (horizon !== '3') {
-                        forecastData = forecastData.filter(item => item.forecast_horizon == horizon);
-                    }
-
-                    if (cycle !== 'latest') {
-                        // Filter by cycle logic - you can customize this based on your cycle requirements
-                        forecastData = forecastData.filter(item => {
-                            // Example: filter by forecast_date for cycle selection
-                            const forecastMonth = new Date(item.forecast_date).getMonth() + 1;
-                            const currentMonth = new Date().getMonth() + 1;
-
-                            if (cycle === 'previous') {
-                                return forecastMonth === (currentMonth - 1) || (currentMonth === 1 ? forecastMonth === 12 : false);
-                            } else if (cycle === '2months') {
-                                return forecastMonth === (currentMonth - 2) || (currentMonth <= 2 ? forecastMonth === (12 + currentMonth - 2) : false);
-                            }
-                            return true;
-                        });
-                    }
+                    // Note: These filters can't be applied with the current pivoted data structure
+                    // They would need to be applied at the database query level instead
                 }
 
                 updateForecastTable(forecastData);
                 updateForecastSummary(forecastData);
-                
-                // Update currentData with forecast data
-                currentData = currentData || [];
-                currentData = [...currentData, ...forecastData];
                 
                 // Refresh pivot table and charts
                 if (currentData.length > 0) {

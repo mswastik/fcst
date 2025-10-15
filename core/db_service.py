@@ -614,7 +614,8 @@ class DatabaseService:
                     'forecast_value': forecast_values[i],
                     'confidence_lower': confidence_lower[i],
                     'confidence_upper': confidence_upper[i],
-                    'model_version': model_versions[i]
+                    'model_version': model_versions[i],
+                    'created_at': datetime.today().strftime('%Y-%m-%d %H:%M:%S')
                 })
         else:
             # Process records individually when we need to extract skeys from unique_id
@@ -684,7 +685,8 @@ class DatabaseService:
                     'forecast_value': forecast_value,
                     'confidence_lower': row.get('confidence_lower'),
                     'confidence_upper': row.get('confidence_upper'),
-                    'model_version': row.get('model_version', '1.0')
+                    'model_version': row.get('model_version', '1.0'),
+                    'created_date': datetime.today().strftime('%Y-%m-%d%H%M%S')
                 })
 
         if not records_to_insert:

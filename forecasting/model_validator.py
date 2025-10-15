@@ -194,7 +194,7 @@ class ModelValidator:
                 return None
             
             # Train and predict
-            nf = NeuralForecast(models=[model], freq='1mo')
+            nf = NeuralForecast(models=[model], freq='M')
             nf.fit(df=df_model.fill_nan(0).fill_null(0))
             forecasts = nf.predict()
             
@@ -245,7 +245,7 @@ class ModelValidator:
                 return None
             
             # Train and predict
-            sf = StatsForecast(models=[model], freq='1mo')
+            sf = StatsForecast(models=[model], freq='MS')
             sf.fit(df=df_model.fill_nan(0).fill_null(0))
             forecasts = sf.predict(h=60)
             

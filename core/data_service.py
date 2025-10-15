@@ -1,40 +1,50 @@
 """
-Data service module for FCST application.
-Provides data loading, processing, and forecasting functionality.
+Simplified Data service module for FCST application.
+Provides data loading, processing, and forecasting functionality using MLForecast.
 """
 import polars as pl
 from typing import Optional, Dict, Any, List, Tuple
 from core.state_manager import DataState, get_global_state
 from core.utils import DataUtils, DatabaseUtils, ErrorHandler
-from neuralforecast import NeuralForecast
-from neuralforecast.models import NHITS
-from neuralforecast.losses.pytorch import RMSE
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, silhouette_score
-from sklearn.cluster import Birch, KMeans
+from mlforecast import MLForecast
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import VotingRegressor
+import xgboost as xgb
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from mlforecast.lag_transforms import ExpandingMean, RollingMean
 from scipy.stats import pearsonr
+from sklearn.cluster import Birch, KMeans
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, silhouette_score
+from joblib import Parallel, delayed
+from tqdm import tqdm
+from tqdm_joblib import tqdm_joblib
+from contextlib import contextmanager
 import warnings
-warnings.filterwarnings('ignore')
 
-# Import forecasting modules at module level to avoid pickling issues
-try:
-    from forecasting.data_processor import ForecastDataProcessor, ValidationProcessor, DataCleaner
-    from forecasting.model_factory import EnsembleForecaster
-    FORECASTING_AVAILABLE = True
-except ImportError as e:
-    # Fallback if modules don't exist yet
-    print(f"Warning: Forecasting modules not available: {e}")
-    ForecastDataProcessor = None
-    ValidationProcessor = None
-    DataCleaner = None
-    EnsembleForecaster = None
-    FORECASTING_AVAILABLE = False
 
-today = datetime.today()
-last_full_month = datetime(today.year, today.month, 1) - relativedelta(months=1)
+def calculate_seasonal_strength(ts, period):
+    """Calculate seasonal strength using STL decomposition approach"""
+    if len(ts) < 2 * period:
+        return 0
+    
+    try:
+        # Simple seasonal strength calculation
+        seasonal_vals = []
+        for i in range(period):
+            seasonal_vals.append(np.mean([ts[j] for j in range(i, len(ts), period)]))
+        
+        seasonal_var = np.var(seasonal_vals)
+        total_var = np.var(ts)
+        
+        return seasonal_var / total_var if total_var != 0 else 0
+    except:
+        return 0
+
 def extract_ts_features(df):
     """Extract comprehensive time series features for clustering"""
     features = []
@@ -92,24 +102,6 @@ def extract_ts_features(df):
         })
     
     return pl.DataFrame(features)
-
-def calculate_seasonal_strength(ts, period):
-    """Calculate seasonal strength using STL decomposition approach"""
-    if len(ts) < 2 * period:
-        return 0
-    
-    try:
-        # Simple seasonal strength calculation
-        seasonal_vals = []
-        for i in range(period):
-            seasonal_vals.append(np.mean([ts[j] for j in range(i, len(ts), period)]))
-        
-        seasonal_var = np.var(seasonal_vals)
-        total_var = np.var(ts)
-        
-        return seasonal_var / total_var if total_var != 0 else 0
-    except:
-        return 0
 
 def optimize_clusters(features_df, max_clusters=10):
     """Find optimal number of clusters using silhouette score"""
@@ -191,562 +183,307 @@ def create_enhanced_clusters(df: pl.DataFrame, file_path: str, state: DataState 
     
     return df
 
-def create_ensemble_models(df: pl.DataFrame, file_path: str) -> pl.DataFrame:
-    """Create ensemble models for each cluster using the new modular approach."""
-    # Prepare data
-    dft = prepare_data1(df)
-    if DataCleaner is not None:
-        dft = DataCleaner.prepare_data_for_forecasting(dft)
-    
-    # Ensure we have the right columns for forecasting
-    if 'SALES_DATE' in dft.columns:
-        dft = dft.rename({'SALES_DATE': 'ds'})
-    if 'sales_date' in dft.columns:
-        dft = dft.rename({'sales_date': 'ds'})
-    if 'Act Orders Rev' in dft.columns:
-        dft = dft.rename({'Act Orders Rev': 'y'})
-    if 'act_orders_rev' in dft.columns:
-        dft = dft.rename({'act_orders_rev': 'y'})
-    
-    # Ensure we have required columns for the forecaster
-    required_cols = ['unique_id', 'ds', 'y', 'cluster']
-    # Add item_skey and location_skey if they exist
-    if 'item_skey' in dft.columns:
-        required_cols.append('item_skey')
-    if 'location_skey' in dft.columns:
-        required_cols.append('location_skey')
-    
-    # Select only required columns that exist in the dataframe
-    available_cols = [col for col in required_cols if col in dft.columns]
-    df_fr = dft[available_cols]
-    
-    # Create forecaster and generate forecasts
-    if EnsembleForecaster is not None:
-        forecaster = EnsembleForecaster(horizon=60)
-        return forecaster.generate_forecasts(df_fr)
-    else:
-        # Fallback to simple NHITS model if EnsembleForecaster not available
-        return _create_simple_forecasts(df_fr)
-    
-def validate_forecasts(df: pl.DataFrame, forecast_df: pl.DataFrame, validation_months: int = 6) -> dict:
-    """Validate forecasts using walk-forward validation"""
-    if ValidationProcessor is not None:
-        return ValidationProcessor.validate_forecasts(df, forecast_df, validation_months)
-    else:
-        # Simple fallback validation
-        return {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0}
+def tdays(dates: pd.DatetimeIndex) -> pd.Series:
+    """Calculate the number of days since the reference date (2022-01-01)."""
+    reference_date = pd.Timestamp('2022-01-01')
+    return pd.Series((dates - reference_date).days, index=dates, name='tdays')
 
-# Additional utility functions
-def prepare_data(df: pl.DataFrame) -> pl.DataFrame:
-    """Prepare data with proper handling of missing values and outliers"""
-    if DataCleaner is not None:
-        return DataCleaner.prepare_data_for_forecasting(df)
-    else:
-        # Simple fallback preparation
-        return df.fill_null(0)
-
-def _standalone_forecasting_pipeline(df_json: str, file_path: str) -> tuple:
-    """Complete standalone forecasting pipeline with actual forecast generation"""
-    import polars as pl
-    import numpy as np
-    from sklearn.cluster import Birch
-    from datetime import datetime
-    from dateutil.relativedelta import relativedelta
+def prepare_data_for_mlforecast(df: pl.DataFrame) -> pl.DataFrame:
+    """Prepare data for MLForecast with required column names"""
+    # Make a copy to avoid modifying original
+    prepared_df = df.clone()
     
-    try:
-        # Reconstruct dataframe from JSON - handle long filename issues
-        try:
-            df = pl.read_json(df_json)
-        except Exception as json_read_error:
-            print(f"JSON reading failed due to long paths: {json_read_error}")
-            # Try alternative approach - use pandas as intermediate
-            try:
-                import pandas as pd
-                import json
-                
-                # Parse JSON and convert to pandas then polars
-                json_data = json.loads(df_json)
-                pdf = pd.DataFrame(json_data)
-                
-                # Handle date columns properly before converting to polars
-                if 'sales_date' in pdf.columns:
-                    # Convert string dates to datetime objects
-                    try:
-                        pdf['sales_date'] = pd.to_datetime(pdf['sales_date'])
-                    except Exception as date_error:
-                        print(f"Error converting sales_date to datetime: {date_error}")
-                        # Try to parse dates manually if automatic conversion fails
-                        try:
-                            pdf['sales_date'] = pd.to_datetime(pdf['sales_date'], format='%Y-%m-%d', errors='coerce')
-                        except Exception as manual_date_error:
-                            print(f"Manual date conversion also failed: {manual_date_error}")
-                            # Last resort - drop problematic date column and recreate
-                            pdf = pdf.drop('sales_date', axis=1)
-                            pdf['sales_date'] = pd.to_datetime('2024-01-01')
-                
-                # Convert numeric columns properly
-                numeric_cols = ['Act Orders Rev', 'Fcst Stat Prelim Rev', 'Fcst Stat Final Rev', 
-                              'L2 Stat Final Rev', 'Fcst DF Final Rev', 'L2 DF Final Rev', 'act_orders_rev'] # Added 'act_orders_rev'
-                for col in numeric_cols:
-                    if col in pdf.columns:
-                        try:
-                            pdf[col] = pd.to_numeric(pdf[col], errors='coerce').fillna(0)
-                        except Exception as num_error:
-                            print(f"Error converting {col} to numeric: {num_error}")
-                            pdf[col] = 0
-                
-                # Convert to polars
-                df = pl.from_pandas(pdf)
-                print("Successfully reconstructed dataframe using pandas intermediate with proper date handling")
-                
-            except Exception as pandas_error:
-                print(f"Pandas intermediate approach also failed: {pandas_error}")
-                # Last resort - create minimal dataframe
-                df = pl.DataFrame({
-                    'sales_date': [datetime.today()],
-                    'act_orders_rev': [0.0],
-                    'country': ['UNKNOWN'],
-                    'catalog_number': ['UNKNOWN']
-                })
-                print("Using fallback minimal dataframe")
-        
-        # Explicitly cast 'act_orders_rev' to Float64 after DataFrame reconstruction
-        if 'act_orders_rev' in df.columns and df['act_orders_rev'].dtype != pl.Float64:
-            try:
-                df = df.with_columns(pl.col('act_orders_rev').cast(pl.Float64).alias('act_orders_rev'))
-                print(f"DEBUG: 'act_orders_rev' cast to Float64. New dtype: {df['act_orders_rev'].dtype}")
-            except Exception as cast_error:
-                print(f"WARNING: Failed to cast 'act_orders_rev' to Float64: {cast_error}")
-                # If casting fails, fill with 0 to prevent further errors
-                df = df.with_columns(pl.col('act_orders_rev').fill_null(0).fill_nan(0).alias('act_orders_rev'))
-
-        # Immediately convert date column to datetime after reconstruction
-        try:
-            if 'sales_date' in df.columns:
-                print(f"Before date conversion: sales_date column type = {df['sales_date'].dtype}")
-                
-                # Check if column is already datetime, if not, convert from string
-                if df['sales_date'].dtype != pl.Datetime:
-                    df = df.with_columns(
-                        pl.col('sales_date').str.to_datetime().alias('sales_date')
-                    )
-                    print(f"After string-to-datetime conversion: sales_date column type = {df['sales_date'].dtype}")
-                else:
-                    print("sales_date column is already datetime, skipping conversion")
-        except Exception as json_date_error:
-            print(f"Error converting JSON date column: {json_date_error}")
-            # If conversion fails, try to cast existing column
-            try:
-                df = df.with_columns(
-                    pl.col('sales_date').cast(pl.Datetime).alias('sales_date')
-                )
-                print(f"After cast: sales_date column type = {df['sales_date'].dtype}")
-            except Exception as cast_error:
-                print(f"Date cast also failed: {cast_error}")
-        
-        print(f"DEBUG: DataFrame dtypes before clustering: {df.dtypes}") # Added debug print
-        # Simple clustering if not present
-        if 'cluster' not in df.columns:
-            # Ensure sales_date is properly formatted as datetime
-            try:
-                if 'sales_date' in df.columns:
-                    # Convert to datetime if it's not already
-                    df = df.with_columns(
-                        pl.col('sales_date').cast(pl.Datetime).alias('sales_date')
-                    )
-            except Exception as date_cast_error:
-                print(f"Error casting sales_date to datetime: {date_cast_error}")
-                # If date casting fails, create a default date column
-                df = df.with_columns(
-                    pl.lit(datetime.today()).alias('sales_date')
-                )
-            
-            # Create unique_id if not present
-            if 'unique_id' not in df.columns:
-                try:
-                    # Use item_skey and location_skey to create unique_id for consistency
-                    df = df.with_columns(
-                        (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-                    )
-                    print(f"DEBUG: Created unique_id using item_skey and location_skey. Sample: {df['unique_id'].head(5).to_list()}")
-                except Exception as unique_id_error:
-                    print(f"Error creating unique_id: {unique_id_error}")
-                    # Fallback to a simple unique_id if item_skey or location_skey are missing
-                    df = df.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
-            
-            # Simple clustering logic with proper date handling
-            try:
-                last_full_month = datetime.today() - relativedelta(months=1)
-                print(f"Filtering data before {last_full_month}")
-
-                # Ensure we have the right data types before filtering
-                df1 = df.filter(pl.col('sales_date').dt.date() <= last_full_month.date())
-                df1 = df1[['unique_id', 'sales_date', 'act_orders_rev']]
-                df1 = df1.with_columns(pl.col('act_orders_rev').cast(pl.Float32).alias('act_orders_rev'))
-                df1 = df1.with_columns(ynorm=((pl.col('act_orders_rev')-pl.col('act_orders_rev').mean()) / pl.col('act_orders_rev').std()).over('unique_id'))
-                df1 = df1.fill_nan(0)
-                df1 = df1.with_columns(pl.when(pl.col('ynorm').is_infinite()).then(0).otherwise(pl.col('ynorm')).alias('ynorm'))
-                df1 = df1.pivot(index='unique_id', on='sales_date', values='ynorm', aggregate_function='sum')
-                
-                if len(df1) > 0:
-                    bi = Birch(n_clusters=6).fit(df1[:, 1:])
-                    df1 = df1.with_columns(cluster=bi.labels_)
-                    df1 = df1['unique_id', 'cluster']
-                    df = df.join(df1, on='unique_id', how='left', coalesce=True)
-                    df = df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
-                    df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
-                    print(f"Successfully created {len(df1)} clusters")
-                else:
-                    print("No data available for clustering")
-            except Exception as clustering_error:
-                print(f"Clustering failed: {clustering_error}")
-                # Continue without clustering
-                df = df.with_columns(cluster=pl.lit("0"))
-        
-        # Actual forecast generation using EnsembleForecaster
-        merged_df = df
-        validation_results = {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0}
-        
-        if FORECASTING_AVAILABLE and EnsembleForecaster is not None:
-            try:
-                # Prepare data for forecasting
-                dft = prepare_data1(df)
-                if DataCleaner is not None:
-                    dft = DataCleaner.prepare_data_for_forecasting(dft)
-                df_fr = dft.rename({'sales_date': 'ds', 'act_orders_rev': 'y'})
-                df_fr = df_fr[['unique_id', 'ds', 'y', 'cluster']]
-                
-                # Generate forecasts using EnsembleForecaster
-                forecaster = EnsembleForecaster(horizon=60)
-                forecast_df = forecaster.generate_forecasts(df_fr)
-                
-                if forecast_df is not None:
-                    print(f"Forecast generation successful! Generated {len(forecast_df)} forecast records")
-                    print(f"DEBUG: Original df columns before merge: {df.columns}")
-                    print(f"DEBUG: Forecast df columns before merge: {forecast_df.columns}")
-                    print(f"DEBUG: Sample original df unique_id: {df['unique_id'].head(5).to_list()}")
-                    print(f"DEBUG: Sample forecast df unique_id: {forecast_df['unique_id'].head(5).to_list()}")
-                    # Check if sales_date column exists before trying to access it
-                    if 'sales_date' in df.columns:
-                        print(f"DEBUG: Sample original df sales_date: {df['sales_date'].head(5).to_list()}")
-                    else:
-                        print("DEBUG: Original df does not have 'sales_date' column")
-                    # Check if sales_date column exists in forecast_df before trying to access it
-                    if 'sales_date' in forecast_df.columns:
-                        print(f"DEBUG: Sample forecast df sales_date: {forecast_df['sales_date'].head(5).to_list()}")
-                    elif 'ds' in forecast_df.columns:
-                        print(f"DEBUG: Sample forecast df ds: {forecast_df['ds'].head(5).to_list()}")
-                    else:
-                        print("DEBUG: Forecast df does not have 'sales_date' or 'ds' column")
-                
-                    # Rename 'ds' back to 'sales_date' in forecast_df for merging
-                    if 'ds' in forecast_df.columns:
-                        forecast_df = forecast_df.rename({'ds': 'sales_date'})
-                        print("DEBUG: Renamed 'ds' to 'sales_date' in forecast_df for merging.")
-                
-                    # Ensure both dataframes have the sales_date column for merging
-                    # The forecast_df should have sales_date from the rename above
-                    # The original df should already have sales_date
-                    merge_columns = ['unique_id']
-                    if 'sales_date' in forecast_df.columns and 'sales_date' in df.columns:
-                        merge_columns.append('sales_date')
-                    else:
-                        print("Warning: sales_date column missing from one or both dataframes, merging on unique_id only")
-                    
-                    # Merge forecast_df with original df
-                    merged_df = df.join(
-                        forecast_df,
-                        on=merge_columns, # This is the key for merging
-                        how='outer',
-                        coalesce=True
-                    )
-                    if len(forecast_df) > 0:
-                        print(f"Sample forecast data: {forecast_df.head(3)}")
-                    
-                    # Save forecasts to database
-                    print("Attempting to save forecasts to database...")
-                    print(f"Forecast DataFrame shape: {forecast_df.shape}")
-                    print(f"Forecast DataFrame columns: {forecast_df.columns}")
-                    if len(forecast_df) > 0:
-                        print(f"Sample forecast data: {forecast_df.head(3)}")
-                        print(f"Forecast data types: {forecast_df.dtypes}")
-                        print(f"Forecast DataFrame columns before processing: {forecast_df.columns}")
-                        
-                        # Ensure forecast DataFrame has required columns for saving
-                        # Handle different possible date column names
-                        if 'ds' in forecast_df.columns:
-                            print("Renaming 'ds' column to 'forecast_date'")
-                            forecast_df = forecast_df.rename({'ds': 'forecast_date'})
-                        elif 'SALES_DATE' in forecast_df.columns:
-                            print("Renaming 'SALES_DATE' column to 'forecast_date'")
-                            forecast_df = forecast_df.rename({'SALES_DATE': 'forecast_date'})
-                        elif 'sales_date' in forecast_df.columns:
-                            print("Renaming 'sales_date' column to 'forecast_date'")
-                            forecast_df = forecast_df.rename({'sales_date': 'forecast_date'})
-                        else:
-                            print("No date column found in forecast DataFrame")
-                        
-                        print(f"Forecast DataFrame columns after date column processing: {forecast_df.columns}")
-                        
-                        # Ensure we have a forecast_date column (required for saving)
-                        if 'forecast_date' not in forecast_df.columns:
-                            print("Warning: Forecast DataFrame missing 'forecast_date' column, cannot save to database")
-                            saved_count = 0
-                        else:
-                            # Ensure forecast_date is properly typed
-                            forecast_df = forecast_df.with_columns(pl.col('forecast_date').cast(pl.Datetime))
-                            
-                            # Ensure we have a forecast value column (use ensemble if available, otherwise use any forecast column)
-                            forecast_value_column = None
-                            possible_forecast_columns = ['ensemble', 'Fcst Ensemble Rev', 'NHITS', 'LSTM', 'AutoARIMA', 'AutoETS', 'SeasonalNaive']
-                            for col in possible_forecast_columns:
-                                if col in forecast_df.columns:
-                                    forecast_value_column = col
-                                    break
-                            
-                            print(f"Found forecast value column: {forecast_value_column}")
-                            print(f"Forecast DataFrame columns: {forecast_df.columns}")
-                            
-                            if forecast_value_column and forecast_value_column != 'forecast_value':
-                                print(f"Renaming '{forecast_value_column}' column to 'forecast_value'")
-                                forecast_df = forecast_df.rename({forecast_value_column: 'forecast_value'})
-                            elif not forecast_value_column:
-                                # If no forecast column found, create a default one
-                                print("No forecast value column found, creating default 'forecast_value' column")
-                                forecast_df = forecast_df.with_columns(pl.lit(0.0).alias('forecast_value'))
-                            else:
-                                print("Forecast value column is already named 'forecast_value'")
-                            # Ensure we have item_skey and location_skey columns for proper saving
-                            if 'item_skey' not in forecast_df.columns or 'location_skey' not in forecast_df.columns:
-                                # Try to extract from unique_id if it's in item_skey_location_skey format
-                                if 'unique_id' in forecast_df.columns:
-                                    print("Extracting item_skey and location_skey from unique_id...")
-                                    # Batch extract item_skey and location_skey from unique_id
-                                    # Assuming unique_id is in format "item_skey_location_skey"
-                                    split_data = forecast_df['unique_id'].str.split('_').to_list()
-                                    item_skeys = []
-                                    location_skeys = []
-                                    
-                                    for parts in split_data:
-                                        if len(parts) == 2:
-                                            try:
-                                                item_skey = int(parts[0])
-                                                location_skey = int(parts[1])
-                                                item_skeys.append(item_skey)
-                                                location_skeys.append(location_skey)
-                                            except ValueError:
-                                                # If conversion fails, use None
-                                                item_skeys.append(None)
-                                                location_skeys.append(None)
-                                        else:
-                                            # Invalid format
-                                            item_skeys.append(None)
-                                            location_skeys.append(None)
-                                    
-                                    forecast_df = forecast_df.with_columns([
-                                        pl.Series('item_skey', item_skeys),
-                                        pl.Series('location_skey', location_skeys)
-                                    ])
-                            
-                            db_service = DatabaseUtils.get_database_service()
-                            if db_service:
-                                try:
-                                    saved_count = db_service.insert_forecasts(forecast_df, model_type="Ensemble")
-                                    print(f"Successfully saved {saved_count} forecast records to database")
-                                except Exception as save_error:
-                                    print(f"Error saving forecasts to database: {save_error}")
-                                    print("Continuing with merged data without saving forecasts")
-                                    saved_count = 0
-                            else:
-                                print("Database service not available, skipping forecast save")
-                                saved_count = 0
-                    
-                    validation_results = {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0, 'forecasts_generated': len(forecast_df), 'forecasts_saved': saved_count}
-                    print(f"Models created successfully. Validation results: {validation_results}")
-                else:
-                    print("Forecast generation returned None")
-                    validation_results = {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0, 'forecasts_generated': 0}
-            except Exception as forecast_error:
-                print(f"Forecast generation failed: {forecast_error}")
-                print("Returning clustered data without forecasts")
-        else:
-            print("EnsembleForecaster not available, returning clustered data")
-        
-        # Return as JSON strings - use IPC format to avoid path length issues
-        try:
-            # Use IPC format instead of JSON to avoid Windows path length limitations
-            import tempfile
-            import os
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.ipc') as tmp_file:
-                merged_df.write_ipc(tmp_file.name) if merged_df is not None else None
-                merged_df_json = tmp_file.name
-        except Exception as ipc_error:
-            print(f"Error serializing to IPC: {ipc_error}")
-            # Fallback to JSON with row limit to avoid path issues
-            try:
-                if merged_df is not None and len(merged_df) > 1000:
-                    # Limit rows to avoid path length issues
-                    merged_df_limited = merged_df.head(1000)
-                    merged_df_json = merged_df_limited.write_json(pretty=False)
-                    print(f"Limited DataFrame to {len(merged_df_limited)} rows to avoid path length issues")
-                else:
-                    merged_df_json = merged_df.write_json(pretty=False) if merged_df is not None else None
-            except Exception as json_error:
-                print(f"Error serializing to JSON: {json_error}")
-                merged_df_json = None
-
-        return merged_df_json, validation_results
-        
-    except Exception as e:
-        print(f"Error in standalone pipeline: {e}")
-        # Ensure we always return a proper tuple even on error
-        return None, {'error': str(e)}
-
-def _merge_forecasts_with_data(original_df: pl.DataFrame, forecast_df: pl.DataFrame) -> pl.DataFrame:
-    """Merge forecast results with original data"""
-    try:
-        # Convert forecast dates to proper format
-        if 'ds' in forecast_df.columns:
-            forecast_df = forecast_df.with_columns(
-                ds=pl.col('ds').cast(pl.Datetime)
+    # Ensure we have the required columns with proper names
+    if 'SALES_DATE' in prepared_df.columns:
+        prepared_df = prepared_df.rename({'SALES_DATE': 'ds'})
+    if 'sales_date' in prepared_df.columns:
+        prepared_df = prepared_df.rename({'sales_date': 'ds'})
+    if 'Act Orders Rev' in prepared_df.columns:
+        prepared_df = prepared_df.rename({'Act Orders Rev': 'y'})
+    if 'act_orders_rev' in prepared_df.columns:
+        prepared_df = prepared_df.rename({'act_orders_rev': 'y'})
+    
+    # Ensure 'ds' column is datetime
+    if 'ds' in prepared_df.columns:
+        prepared_df = prepared_df.with_columns(
+            pl.col('ds').cast(pl.Datetime).alias('ds')
+        )
+    
+    # Ensure 'y' column is numeric
+    if 'y' in prepared_df.columns:
+        prepared_df = prepared_df.with_columns(
+            pl.col('y').cast(pl.Float64).alias('y')
+        )
+        # Remove null or infinite values
+        prepared_df = prepared_df.filter(
+            pl.col('y').is_not_null() & 
+            pl.col('y').is_finite()
+        )
+    
+    # Ensure we have unique_id
+    if 'unique_id' not in prepared_df.columns:
+        if 'item_skey' in prepared_df.columns and 'location_skey' in prepared_df.columns:
+            prepared_df = prepared_df.with_columns(
+                (pl.col('item_skey').cast(pl.Utf8) + "_" + 
+                 pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
             )
-        
-        # Rename forecast columns to match expected format
-        forecast_renamed = forecast_df.rename({
-            'ds': 'sales_date'
-        })
-        
-        # Handle different forecast model column names
-        if 'ensemble' in forecast_renamed.columns:
-            forecast_renamed = forecast_renamed.rename({'ensemble': 'Fcst Ensemble Rev'})
-        elif 'NHITS' in forecast_renamed.columns:
-            forecast_renamed = forecast_renamed.rename({'NHITS': 'Fcst Ensemble Rev'})
-        elif 'LSTM' in forecast_renamed.columns:
-            forecast_renamed = forecast_renamed.rename({'LSTM': 'Fcst Ensemble Rev'})
+        elif 'Country' in prepared_df.columns and 'CatalogNumber' in prepared_df.columns:
+            prepared_df = prepared_df.with_columns(
+                (pl.col('Country') + "," + pl.col('CatalogNumber')).alias('unique_id')
+            )
         else:
-            # Use the first available forecast column or create a default one
-            forecast_cols = [col for col in forecast_renamed.columns if col not in ['unique_id', 'sales_date']]
-            if forecast_cols:
-                forecast_renamed = forecast_renamed.rename({forecast_cols[0]: 'Fcst Ensemble Rev'})
-            else:
-                forecast_renamed = forecast_renamed.with_columns(pl.lit(0.0).alias('Fcst Ensemble Rev'))
+            prepared_df = prepared_df.with_columns(
+                unique_id=pl.lit("UNKNOWN")
+            )
+    
+    return prepared_df
+
+
+def create_mlforecast_models(df: pl.DataFrame, horizon: int = 12) -> pl.DataFrame:
+    """Create forecasts for each unique_id using MLForecast with parallel processing
+    
+    Args:
+        df: Polars DataFrame with sales data
+        horizon: Number of periods to forecast ahead
         
-        # Merge forecasts with original data
-        # This will add forecast columns to future dates
-        merged_df = original_df.join(
-            forecast_renamed,
-            on=['unique_id', 'sales_date'],
-            how='outer',
-            coalesce=True
+    Returns:
+        Polars DataFrame with forecasts including columns: unique_id, forecast_date, Fcst Ensemble Rev
+    """
+    if df.is_empty():
+        return pl.DataFrame()
+    
+    try:
+        # Prepare data for MLForecast
+        prepared_df = prepare_data_for_mlforecast(df)
+        
+        if prepared_df.is_empty() or 'unique_id' not in prepared_df.columns or 'ds' not in prepared_df.columns or 'y' not in prepared_df.columns:
+            print("Required columns missing for MLForecast")
+            return pl.DataFrame()
+        
+        # Filter to training data (excluding the last month)
+        cutoff_date = datetime.today() - relativedelta(months=1)
+        train_df = prepared_df.filter(pl.col('ds').dt.date() <= cutoff_date.date())
+        
+        if train_df.is_empty():
+            print("Training data is empty after filtering")
+            return pl.DataFrame()
+        
+        # Ensure we have enough data points for each unique_id
+        min_data_points = 10  # Minimum data points required for forecasting
+        valid_ids = (
+            train_df
+            .group_by('unique_id')
+            .count()
+            .filter(pl.col('count') >= min_data_points)
+            .get_column('unique_id')
         )
         
-        return merged_df
+        if len(valid_ids) == 0:
+            print(f"No unique_ids have sufficient data (minimum {min_data_points} points)")
+            return pl.DataFrame()
+        
+        train_df = train_df.filter(pl.col('unique_id').is_in(valid_ids))
+        
+        if train_df.is_empty():
+            print("No sufficient data after filtering by unique_id")
+            return pl.DataFrame()
+
+        # Define models - using XGBoost models as in the current code
+        xgb1 = xgb.XGBRegressor(random_state=0, booster='gblinear')
+        xgb2 = xgb.XGBRegressor(random_state=0)
+        
+        # Define models for MLForecast - using models that handle NaN values
+        models = {
+            'rf': RandomForestRegressor(n_estimators=50, random_state=42),
+            'xgb': VotingRegressor([('xgb1', xgb1), ('xgb2', xgb2)])
+        }
+
+        # Use ml_per_series for parallel forecasting - returns polars DataFrame
+        print(f"=== Starting MLForecast for {len(valid_ids)} series ===")
+        print(f"Models: {list(models.keys())}")
+        print(f"Lags: [3, 4, 5, 6, 12]")
+        print(f"Lag transforms: RollingMean(3) on lag 3")
+        print(f"Date features: ['month', 'year']")
+        print(f"Parallel jobs: 1 (sequential processing)")
+        print(f"Min observations per series: {min_data_points}")
+        print("=" * 50)
+        
+        forecasts_pl = ml_per_series(
+            idf=train_df[['unique_id','ds','y']].fill_nan(0),
+            models=models,
+            horizon=horizon,
+            freq='MS',
+            lags=[3, 4, 5, 6, 12],
+            lag_transforms={3: [RollingMean(3)]},
+            date_features=['month', tdays],
+            n_jobs=1,
+            min_obs=min_data_points
+        )
+        
+        print("=" * 50)
+        print(f"=== Forecasting completed ===")
+        
+        # Check if forecasts were generated
+        if forecasts_pl.is_empty():
+            print("No forecasts were generated")
+            return pl.DataFrame()
+        
+        # Rename forecast column to match expected format
+        if 'rf' in forecasts_pl.columns:
+            forecasts_pl = forecasts_pl.rename({'rf': 'Fcst Ensemble Rev'})
+        elif 'xgb' in forecasts_pl.columns:
+            forecasts_pl = forecasts_pl.rename({'xgb': 'Fcst Ensemble Rev'})
+        else:
+            # Use the first available forecast column
+            forecast_cols = [col for col in forecasts_pl.columns if col not in ['unique_id', 'ds', 'y']]
+            if forecast_cols:
+                forecasts_pl = forecasts_pl.rename({forecast_cols[0]: 'Fcst Ensemble Rev'})
+        
+        # Ensure proper column names for database integration
+        if 'ds' in forecasts_pl.columns:
+            forecasts_pl = forecasts_pl.rename({'ds': 'forecast_date'})
+        
+        return forecasts_pl
         
     except Exception as e:
-        print(f"Error merging forecasts: {e}")
-        return original_df
+        print(f"Error in MLForecast: {e}")
+        import traceback
+        traceback.print_exc()
+        return pl.DataFrame()
 
-def run_enhanced_forecasting_pipeline(df: pl.DataFrame, file_path: str, state: DataState = None):
-    """Run the complete enhanced forecasting pipeline - wrapper for UI"""
-    try:
-        # Convert dataframe to JSON for pickling
-        df_json = df.write_json()
 
-        # Call the pickle-safe implementation
-        result = _standalone_forecasting_pipeline(df_json, file_path)
-
-        # Ensure we have a proper tuple return
-        if result is None or not isinstance(result, tuple) or len(result) != 2:
-            print(f"Invalid return from _standalone_forecasting_pipeline: {result}")
-            merged_df_json, validation_results = None, {'error': 'Invalid pipeline return'}
-        else:
-            merged_df_json, validation_results = result
-
-        # Reconstruct dataframe from JSON/IPC
-        if merged_df_json is not None:
-            try:
-                # Check if it's an IPC file (temporary file) or JSON string
-                if isinstance(merged_df_json, str) and merged_df_json.endswith('.ipc'):
-                    # Read from IPC file
-                    merged_df = pl.read_ipc(merged_df_json)
-                    # Clean up temporary file
-                    try:
-                        os.unlink(merged_df_json)
-                    except:
-                        pass  # Ignore cleanup errors
-                else:
-                    # Read from JSON string
-                    merged_df = pl.read_json(merged_df_json)
-                # Update state if provided
-                if state is not None:
-                    state.df = merged_df
-            except Exception as json_read_error:
-                print(f"Error reading result data: {json_read_error}")
-                merged_df = None
-        else:
-            merged_df = None
-
-        return merged_df, validation_results
-
-    except Exception as e:
-        print(f"Error in run_enhanced_forecasting_pipeline: {e}")
-        return None, {'error': str(e)}
-
-def filter_last_36_months(df: pl.DataFrame) -> pl.DataFrame:
-    """Filter data to last 36 months"""
-    if DataCleaner is not None:
-        return DataCleaner.filter_last_n_months(df, 36)
-    else:
-        # Simple fallback filter with timezone-safe comparison
-        cutoff_date = datetime.today() - relativedelta(months=36)
-        return df.filter(pl.col('sales_date').dt.date() >= cutoff_date.date())
-
-def prepare_data1(df: pl.DataFrame) -> pl.DataFrame:
-    """Prepare data for training"""
-    # Ensure consistent unique_id creation
-    if 'unique_id' not in df.columns:
-        if 'item_skey' in df.columns and 'location_skey' in df.columns:
-            df = df.with_columns(
-                (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-            )
-        else:
-            # Fallback to country and catalog_number if available
-            if 'Country' in df.columns and 'CatalogNumber' in df.columns:
-                df = df.with_columns(
-                    (pl.col('Country') + "," + pl.col('CatalogNumber')).alias('unique_id')
-                )
-            else:
-                # Last resort: create a generic unique_id
-                df = df.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
+def run_mlforecast_pipeline(df: pl.DataFrame, file_path: str, state: DataState = None) -> Tuple[Optional[pl.DataFrame], Dict[str, Any]]:
+    """Run the forecasting pipeline using MLForecast and save results to database
     
-    if DataCleaner is not None:
-        # Ensure SALES_DATE is converted to sales_date before passing to DataCleaner
-        if 'SALES_DATE' in df.columns:
-            df = df.rename({'SALES_DATE': 'sales_date'})
-            print("DEBUG: Renamed 'SALES_DATE' to 'sales_date' in prepare_data1 for DataCleaner.")
-        return DataCleaner.prepare_training_data(df)
-    else:
-        # Simple fallback preparation with proper date handling
-        try:
-            # Ensure SALES_DATE is converted to sales_date for fallback logic
-            if 'SALES_DATE' in df.columns:
-                df = df.rename({'SALES_DATE': 'sales_date'})
-                print("DEBUG: Renamed 'SALES_DATE' to 'sales_date' in prepare_data1 fallback.")
+    Args:
+        df: Polars DataFrame with sales data
+        file_path: Path to the data file (for reference)
+        state: Optional DataState instance
+        
+    Returns:
+        Tuple of (original_df, validation_results_dict)
+    """
+    if state is None:
+        state = get_global_state()
+    
+    try:
+        # Make a copy of the original dataframe to preserve original column names
+        original_df = df.clone()
+        
+        # Generate forecasts with MLForecast - returns polars DataFrame
+        forecast_df = create_mlforecast_models(df, horizon=60)
+        
+        if forecast_df is not None and not forecast_df.is_empty():
+            # Save forecasts to database if service is available
+            db_service = DatabaseUtils.get_database_service()
+            saved_count = 0
+            
+            if db_service:
+                try:
+                    # Ensure forecast_df has necessary columns for database insertion
+                    if 'unique_id' in forecast_df.columns and 'forecast_date' in forecast_df.columns:
+                        # Add item_skey and location_skey if they don't exist by extracting from unique_id
+                        if 'item_skey' not in forecast_df.columns or 'location_skey' not in forecast_df.columns:
+                            # Extract item_skey and location_skey from unique_id (format: item_skey_location_skey)
+                            split_data = forecast_df['unique_id'].str.split('_').to_list()
+                            
+                            item_skeys = []
+                            location_skeys = []
+                            
+                            for parts in split_data:
+                                if len(parts) == 2:
+                                    try:
+                                        item_skey = int(parts[0])
+                                        location_skey = int(parts[1])
+                                        item_skeys.append(item_skey)
+                                        location_skeys.append(location_skey)
+                                    except (ValueError, TypeError):
+                                        item_skeys.append(None)
+                                        location_skeys.append(None)
+                                else:
+                                    item_skeys.append(None)
+                                    location_skeys.append(None)
+                            
+                            # Add columns to polars DataFrame
+                            forecast_df = forecast_df.with_columns([
+                                pl.Series('item_skey', item_skeys),
+                                pl.Series('location_skey', location_skeys)
+                            ])
+                        
+                        # Insert forecasts into database
+                        print(f"\n>>> Starting database insertion for {len(forecast_df)} forecast records...")
+                        import time
+                        db_start = time.time()
+                        saved_count = db_service.insert_forecasts(forecast_df, model_type="MLForecast")
+                        db_time = time.time() - db_start
+                        print(f">>> Database insertion completed in {db_time:.2f}s")
+                        print(f">>> Successfully saved {saved_count} forecast records to database")
+                except Exception as save_error:
+                    print(f"Error saving forecasts to database: {save_error}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Update state with original data (preserving original structure)
+            if state is not None:
+                state.df = original_df
+            
+            # Return validation results
+            validation_results = {
+                'mae': 0.0,
+                'mape': 0.0,
+                'rmse': 0.0,
+                'forecasts_generated': len(forecast_df),
+                'forecasts_saved': saved_count
+            }
+            
+            return original_df, validation_results
+        else:
+            print("No forecasts generated")
+            return original_df, {'mae': 0.0, 'mape': 0.0, 'rmse': 0.0, 'forecasts_generated': 0, 'forecasts_saved': 0}
+    
+    except Exception as e:
+        print(f"Error in run_mlforecast_pipeline: {e}")
+        import traceback
+        traceback.print_exc()
+        return df, {'error': str(e), 'forecasts_generated': 0, 'forecasts_saved': 0}
 
-            # Define last_full_month for filtering
-            last_full_month = datetime.today() - relativedelta(months=1)
+
+def create_models_action(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
+    """Business logic for creating forecasting models using MLForecast"""
+    if state is None:
+        state = get_global_state()
+    
+    try:
+        # Run the MLForecast pipeline
+        result_df, validation_results = run_mlforecast_pipeline(df, file_path, state)
+        
+        # Ensure original column structure is preserved for UI compatibility
+        if result_df is not None and not result_df.is_empty():
+            # Check if result_df is a polars DataFrame
+            is_polars_result = isinstance(result_df, pl.DataFrame)
+            is_polars_original = isinstance(df, pl.DataFrame)
             
-            # Ensure sales_date is datetime before filtering
-            if 'sales_date' in df.columns:
-                df = df.with_columns(
-                    pl.col('sales_date').cast(pl.Datetime).alias('sales_date')
-                )
-            
-            return df.fill_null(0).filter(pl.col('sales_date').dt.date() <= last_full_month.date())
-        except Exception as date_error:
-            print(f"Error in prepare_data1 date filtering: {date_error}")
-            # If date filtering fails, just return the data without filtering
-            return df.fill_null(0)
+            # If original df had SALES_DATE, ensure it's still present
+            if 'SALES_DATE' in df.columns and 'SALES_DATE' not in result_df.columns:
+                if is_polars_result and is_polars_original:
+                    result_df = result_df.with_columns(df['SALES_DATE'])
+                elif not is_polars_result and not is_polars_original:  # Both are pandas
+                    result_df['SALES_DATE'] = df['SALES_DATE']
+            # If original df had sales_date, ensure it's still present  
+            elif 'sales_date' in df.columns and 'sales_date' not in result_df.columns:
+                if is_polars_result and is_polars_original:
+                    result_df = result_df.with_columns(df['sales_date'])
+                elif not is_polars_result and not is_polars_original:  # Both are pandas
+                    result_df['sales_date'] = df['sales_date']
+        
+        print(f"Models created successfully. Validation results: {validation_results}")
+        return result_df
+    except Exception as e:
+        print(f"Error in create_models_action: {e}")
+        import traceback
+        traceback.print_exc()
+        return df
+
 
 def apply_filters(filters, state: DataState = None):
     """Apply filters to the dataset by querying database directly"""
@@ -837,131 +574,141 @@ def apply_filters(filters, state: DataState = None):
             'filtered_models': []
         }
 
-def create_clusters(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
-    """Create clusters for the dataset"""
-    if state is None:
-        state = get_global_state()
-    
-    # Ensure unique_id is created consistently using item_skey and location_skey
-    if 'unique_id' not in df.columns:
-        if 'item_skey' in df.columns and 'location_skey' in df.columns:
-            df = df.with_columns(
-                (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-            )
-        else:
-            # Fallback to country and catalog_number if available
-            if 'Country' in df.columns and 'CatalogNumber' in df.columns:
-                df = df.with_columns(
-                    (pl.col('Country') + "," + pl.col('CatalogNumber')).alias('unique_id')
-                )
-            else:
-                # Last resort: create a generic unique_id
-                df = df.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
-    
-    # Remove existing cluster columns
-    df = df.drop(['cluster', 'cluster_right'], strict=False)
-    
-    # Filter to training data
-    df1 = df.filter(pl.col('sales_date').dt.date() <= (datetime.today() - relativedelta(months=1)).date())
-    df1 = df1[['unique_id', 'sales_date', 'act_orders_rev']]
-    df1 = df1.with_columns(pl.col('act_orders_rev').cast(pl.Float32).alias('act_orders_rev'))
-    df1 = df1.with_columns(ynorm=((pl.col('act_orders_rev')-pl.col('act_orders_rev').mean()) / pl.col('act_orders_rev').std()).over('unique_id'))
-    df1 = df1.fill_nan(0)
-    df1 = df1.with_columns(pl.when(pl.col('ynorm').is_infinite()).then(0).otherwise(pl.col('ynorm')).alias('ynorm'))
-    df1 = df1.pivot(index='unique_id', on='sales_date', values='ynorm', aggregate_function='sum')
-    
-    if len(df1) > 1:  # Need at least 2 points for clustering
-        bi = Birch(n_clusters=6).fit(df1[:, 1:])
-        df1 = df1.with_columns(cluster=bi.labels_)
-        df1 = df1[['unique_id', 'cluster']]
-        df = df.join(df1, on='unique_id', how='left', coalesce=True)
-        df = df.with_columns(cluster=pl.col("cluster").forward_fill().backward_fill().over("unique_id"))
-        df = df.with_columns(cluster=pl.col('cluster').cast(pl.Utf8))
-    else:
-        # Not enough data for clustering, assign all to cluster 0
-        df = df.with_columns(cluster=pl.lit("0"))
-    
-    # Save clusters to database instead of parquet
-    db_service = DatabaseUtils.get_database_service()
-    if db_service:
-        db_service.upsert_clusters(df)
-    
-    # Update state with clustered data
-    state.df = df
-    
-    return df
-    
-def _create_simple_forecasts(df_fr: pl.DataFrame) -> pl.DataFrame:
-    """Simple NHITS forecasting fallback"""
-    try:
-        # Ensure unique_id is created consistently if not already present
-        if 'unique_id' not in df_fr.columns:
-            try:
-                df_fr = df_fr.with_columns(
-                    (pl.col('item_skey').cast(pl.Utf8) + "_" + pl.col('location_skey').cast(pl.Utf8)).alias('unique_id')
-                )
-                print(f"DEBUG: Created unique_id in _create_simple_forecasts using item_skey and location_skey. Sample: {df_fr['unique_id'].head(5).to_list()}")
-            except Exception as unique_id_error:
-                print(f"Error creating unique_id in _create_simple_forecasts: {unique_id_error}")
-                df_fr = df_fr.with_columns(unique_id=pl.lit("UNKNOWN_UNKNOWN"))
-
-        # Simple NHITS model for each cluster
-        forecasts = []
-        
-        for cluster in df_fr['cluster'].unique():
-            cluster_data = df_fr.filter(pl.col('cluster') == cluster)
-            
-            # Create simple NHITS model
-            models = [NHITS(h=60, input_size=24, max_steps=50)]
-            nf = NeuralForecast(models=models, freq='M')
-            
-            # Fit and predict
-            nf.fit(cluster_data.to_pandas())
-            forecast = nf.predict()
-            
-            # Convert back to polars
-            forecast_pl = pl.from_pandas(forecast.reset_index())
-            forecasts.append(forecast_pl)
-        
-        # Combine all forecasts
-        if forecasts:
-            return pl.concat(forecasts)
-        else:
-            return pl.DataFrame()
-            
-    except Exception as e:
-        print(f"Error in simple forecasting: {e}")
-        return pl.DataFrame()
-
-def create_models_action(df: pl.DataFrame, file_path: str, state: DataState = None) -> pl.DataFrame:
-    """Business logic for creating models"""
-    if state is None:
-        state = get_global_state()
-    
-    try:
-        # Run the enhanced pipeline
-        result = run_enhanced_forecasting_pipeline(df, file_path, state)
-        
-        # Ensure we have a proper tuple return
-        if result is None or not isinstance(result, tuple) or len(result) != 2:
-            print(f"Invalid return from run_enhanced_forecasting_pipeline: {result}")
-            merged_df, validation_results = None, {'error': 'Invalid pipeline return'}
-        else:
-            merged_df, validation_results = result
-        
-        # Update state
-        if merged_df is not None:
-            state.df = merged_df
-            print(f"Models created successfully. Validation results: {validation_results}")
-        else:
-            print("Model creation failed")
-        
-        return merged_df
-    except Exception as e:
-        print(f"Error in create_models_action: {e}")
-        return df
 
 def change_fc_action():
     """Business logic for changing forecast settings"""
-    # Actual forecast settings logic would go here
     return "Changing forecast settings"
+
+
+def ml_one_series(uid, group_df, models, horizon, freq, lags, lag_transforms, date_features, min_obs=30):
+    """
+    Fit MLForecast on one series (unique_id == uid), predict horizon ahead.
+    Returns a pandas DataFrame with predictions, with 'unique_id' = uid.
+    
+    Args:
+        uid: Unique identifier for the series
+        group_df: Pandas DataFrame with columns ds, y for this series
+        models: Dictionary of model instances
+        horizon: Number of periods to forecast
+        freq: Frequency string
+        lags: List of lag values
+        lag_transforms: Dictionary of lag transformations
+        date_features: List of date features
+        min_obs: Minimum observations required
+        
+    Returns:
+        Pandas DataFrame with forecasts or None if forecasting fails
+    """
+    import time
+    start_time = time.time()
+    
+    # Check if the series has enough data points
+    if len(group_df) < min_obs:
+        print(f"[{uid}] Skipped: Only {len(group_df)} data points (need {min_obs})")
+        return None
+    
+    # Check if the series has enough positive values
+    positive_count = (group_df['y'] > 0).sum()
+    if positive_count < min_obs:
+        print(f"[{uid}] Skipped: Only {positive_count} positive values (need {min_obs})")
+        return None
+    
+    print(f"[{uid}] Starting forecast with {len(group_df)} data points...")
+    
+    try:
+        # Suppress MLForecast warnings about dropped series
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', message='.*series were dropped completely.*')
+            warnings.filterwarnings('ignore', category=UserWarning)
+            
+            fit_start = time.time()
+            # Create and fit the model
+            mfh = MLForecast(
+                models=models,
+                freq=freq,
+                lags=lags,
+                lag_transforms=lag_transforms,
+                date_features=date_features
+            )
+            
+            # Fit the model - use dropna=False to be more lenient
+            mfh.fit(group_df, dropna=False)
+            fit_time = time.time() - fit_start
+            print(f"[{uid}] Model fitting took {fit_time:.2f}s")
+            
+            # Predict
+            pred_start = time.time()
+            forecast = mfh.predict(h=horizon)
+            pred_time = time.time() - pred_start
+            print(f"[{uid}] Prediction took {pred_time:.2f}s")
+        
+        # Ensure it's a pandas DataFrame and add unique_id
+        if forecast is not None and len(forecast) > 0:
+            forecast['unique_id'] = uid
+            total_time = time.time() - start_time
+            print(f"[{uid}] ✓ Completed in {total_time:.2f}s total")
+            return forecast
+        else:
+            print(f"[{uid}] ✗ No forecast generated")
+            return None
+            
+    except ValueError as ve:
+        # Handle specific errors like "Found array with 0 sample(s)"
+        if "Found array with 0 sample" in str(ve) or "minimum of 1 is required" in str(ve):
+            print(f"[{uid}] ✗ Skipped: Insufficient data after transformations")
+        else:
+            print(f"[{uid}] ✗ ValueError: {ve}")
+        return None
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"[{uid}] ✗ Error after {elapsed:.2f}s: {e}")
+        return None
+
+
+def ml_per_series(idf, models, horizon=60, freq='MS', lags=[3,4,5,6,12], lag_transforms={3:[RollingMean(3)]}, date_features=None, n_jobs=-1, min_obs=30):
+    """
+    Parallel per-series forecasting using MLForecast.
+    
+    Args:
+        idf: Polars or Pandas DataFrame with columns: unique_id, ds (date), y (target)
+        models: Dictionary of model instances for MLForecast
+        horizon: Number of periods to forecast
+        freq: Frequency string (e.g., 'MS' for month start)
+        lags: List of lag values to use as features
+        lag_transforms: Dictionary of lag transformations
+        date_features: List of date features to extract
+        n_jobs: Number of parallel jobs (-1 for all cores)
+        min_obs: Minimum observations required per series
+    
+    Returns:
+        Polars DataFrame with forecasts for all series
+    """
+    # Convert polars DataFrame to pandas for MLForecast compatibility
+    if hasattr(idf, 'to_pandas'):
+        df_pandas = idf.to_pandas()
+    else:
+        df_pandas = idf.copy()
+    
+    # Group by unique_id
+    groups = [(uid, group) for uid, group in df_pandas.groupby('unique_id')]
+    
+    # Run forecasting with progress bar
+    # Note: Using sequential processing (list comprehension) instead of Parallel for better debugging
+    print(f"Processing {len(groups)} series sequentially...")
+    results = []
+    for i, (uid, group_df) in enumerate(groups, 1):
+        print(f"\n[Progress: {i}/{len(groups)}]")
+        result = ml_one_series(uid, group_df, models, horizon, freq, lags, lag_transforms, date_features, min_obs)
+        results.append(result)
+    
+    # Filter out None results and concatenate
+    dfs = [df for df in results if df is not None]
+    print(f"\n✓ Successfully generated forecasts for {len(dfs)} out of {len(groups)} series")
+    if len(dfs) == 0:
+        return pl.DataFrame()
+    
+    # Concatenate all forecasts and convert to polars
+    all_forecasts_pd = pd.concat(dfs, ignore_index=True)
+    all_forecasts_pl = pl.from_pandas(all_forecasts_pd)
+    
+    return all_forecasts_pl

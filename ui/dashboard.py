@@ -1,7 +1,7 @@
 from nicegui import ui, run, app
 import asyncio
 from core.data_model import get_filter_options, generate_sample_data
-from core.data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
+from core.data_service import apply_filters, create_models_action, change_fc_action
 from core.state_manager import get_global_state
 from core.utils import DataUtils, DatabaseUtils, UIUtils, ErrorHandler
 from ui.charts import update_charts

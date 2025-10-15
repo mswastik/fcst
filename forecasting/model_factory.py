@@ -154,7 +154,7 @@ class ForecastProcessor:
             data = data.filter(pl.col('unique_id').is_in(valid_series))
         
         try:
-            nf = NeuralForecast(models=models, freq='1mo')
+            nf = NeuralForecast(models=models, freq='M')
             nf.fit(df=data.fill_nan(0).fill_null(0))
             return nf.predict()
         except Exception as e:
@@ -164,7 +164,7 @@ class ForecastProcessor:
     
     def _generate_statistical_forecasts(self, models: List, data: pl.DataFrame) -> pl.DataFrame:
         """Generate forecasts using statistical models."""
-        sf = StatsForecast(models=models, freq='1mo')
+        sf = StatsForecast(models=models, freq='MS')
         sf.fit(df=data.fill_nan(0).fill_null(0))
         return sf.predict(h=self.config.horizon)
     

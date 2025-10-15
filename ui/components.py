@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Callable, Optional
 from core.state_manager import get_global_state
 from core.data_model import get_filter_options, generate_sample_data
-from core.data_service import apply_filters, create_models_action, change_fc_action, create_clusters, run_enhanced_forecasting_pipeline
+from core.data_service import apply_filters, create_models_action, change_fc_action
 from forecasting.model_validator import ModelValidator, ValidationReportGenerator
 from core.auth_service import auth_service
 from core.utils import DataUtils, DatabaseUtils, UIUtils, ErrorHandler
@@ -206,7 +206,7 @@ class FilterComponents:
     def _create_product_selects(self):
         """Create product filter dropdowns."""
         # Set default value from filter_state or use 'Franchise' as fallback
-        default_product = self.filter_state.get('product1', 'Franchise')
+        default_product = self.filter_state.get('product1', 'CatalogNumber')
         
         self.product_select1 = ui.select(
             label='Product',
@@ -415,8 +415,8 @@ class ActionButtons:
 
             # Create a simple wrapper for clustering that uses filtered data
             async def cluster_wrapper():
-                from core.data_service import create_clusters
-                result = create_clusters(filtered_df, "", state)
+                from core.data_service import create_enhanced_clusters
+                result = create_enhanced_clusters(filtered_df, "", state)
 
                 # Verify data was saved to database
                 db_service = DatabaseUtils.get_database_service()

@@ -515,10 +515,14 @@ class DatabaseService:
         if not user_id:
             user_id = "system" # Default to system user if not provided
 
-        logger.info(f"Starting forecast insertion for {len(forecast_df)} records, user: {user_id}")
+        total_input_records = len(forecast_df)
+        logger.info(f"Starting forecast insertion for {total_input_records} records, user: {user_id}")
+        print(f"DEBUG: Starting forecast insertion for {total_input_records} records")
+        print(f"DEBUG: DataFrame schema: {forecast_df.schema}")
 
         if forecast_df.is_empty():
             logger.warning("No forecast data to insert.")
+            print("DEBUG: No forecast data to insert.")
             return 0
 
         # Auto-create connection if it doesn't exist
@@ -553,6 +557,7 @@ class DatabaseService:
             raise ValueError("Forecast DataFrame must contain a date column ('forecast_date', 'ds', or 'SALES_DATE').")
 
         logger.info("DataFrame prepared for insertion")
+        print(f"DEBUG: DataFrame prepared - number of unique_id values: {forecast_df['unique_id'].n_unique() if 'unique_id' in forecast_df.columns else 0}")
 
         # Prepare data for insertion - batch process to improve performance
         logger.info("Starting batch data preparation for insertion...")
@@ -604,12 +609,20 @@ class DatabaseService:
                 # Generate a unique forecast_id
                 forecast_id = uuid.uuid4().int & (1<<63)-1  # Generate a 63-bit integer UUID
 
+                # Calculate forecast horizon based on the difference between forecast date and current date
+                current_date = datetime.today().date()
+                forecast_date_obj = forecast_dates[i].date()
+                # Calculate the horizon in months
+                forecast_horizon = (forecast_date_obj.year - current_date.year) * 12 + (forecast_date_obj.month - current_date.month)
+                if forecast_date_obj.day < current_date.day:
+                    forecast_horizon -= 1  # Adjust if the day is earlier in the month
+
                 records_to_insert.append({
                     'forecast_id': forecast_id,
                     'item_skey': item_skeys[i],
                     'location_skey': location_skeys[i],
                     'forecast_date': forecast_dates[i].strftime('%Y-%m-%d'),  # Format date for SQL
-                    'forecast_horizon': 1,  # Assuming horizon of 1 for all records for now
+                    'forecast_horizon': max(1, forecast_horizon),  # Minimum horizon of 1, calculated based on date difference
                     'model_type': model_type,
                     'forecast_value': forecast_values[i],
                     'confidence_lower': confidence_lower[i],
@@ -618,88 +631,127 @@ class DatabaseService:
                     'created_at': datetime.today().strftime('%Y-%m-%d %H:%M:%S')
                 })
         else:
-            # Process records individually when we need to extract skeys from unique_id
-            logger.info("Processing records by extracting skeys from unique_id...")
+            # Process records efficiently by extracting skeys from unique_id in bulk
+            logger.info("Processing records by extracting skeys from unique_id in bulk...")
             
-            # Extract all unique_id values and process them in batch where possible
+            # Extract all unique_id values to process in bulk
             unique_ids = forecast_df['unique_id'].to_list()
             
-            # For unique_ids in item_skey_location_skey format, extract directly without database calls
-            for i, unique_id in enumerate(unique_ids):
-                if i % 100 == 0:  # Log progress every 100 records
-                    logger.info(f"Processing record {i+1}/{total_records}")
-
-                if not unique_id:
-                    logger.warning(f"Skipping row {i} due to missing unique_id")
-                    skipped_count += 1
-                    continue
-
-                # Try to extract item_skey and location_skey directly from unique_id format
+            # First, handle unique_ids in item_skey_location_skey format directly without database calls
+            item_skeys = []
+            location_skeys = []
+            
+            # Calculate total unique IDs to process
+            total_unique_ids = len(unique_ids)
+            processed_unique_ids = 0
+            
+            for unique_id in unique_ids:
                 item_skey = None
                 location_skey = None
                 
-                try:
+                if unique_id and isinstance(unique_id, str):
                     # Check if unique_id is in item_skey_location_skey format
                     if '_' in unique_id:
                         parts = unique_id.split('_', 1)  # Split only on first underscore
                         if len(parts) == 2:
-                            item_skey = int(parts[0])
-                            location_skey = int(parts[1])
+                            try:
+                                item_skey = int(parts[0])
+                                location_skey = int(parts[1])
+                            except ValueError:
+                                # If conversion fails, it's not in the expected format
+                                item_skey = None
+                                location_skey = None
                     elif ',' in unique_id:  # Country,CatalogNumber format
-                        # For this format, we need to query the database as before
-                        logger.debug(f"Getting skeys for unique_id: {unique_id}")
+                        # For this format, extract country and catalog number
+                        try:
+                            country, catalog_number = unique_id.split(',', 1)
+                            # Since we can't do bulk lookups without a separate method, 
+                            # we'll still need to call _get_skeys_for_unique_id
+                            item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
+                        except ValueError:
+                            # If split fails, set both to None
+                            item_skey = None
+                            location_skey = None
+                    else:
+                        # For other formats, try to get skeys via database
                         item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
-                except ValueError:
-                    # If conversion fails, try the database lookup method
-                    logger.debug(f"Getting skeys for unique_id: {unique_id}")
-                    item_skey, location_skey = self._get_skeys_for_unique_id(unique_id, user_id)
+                
+                item_skeys.append(item_skey)
+                location_skeys.append(location_skey)
+                
+                processed_unique_ids += 1
+                if processed_unique_ids % 1000 == 0 or processed_unique_ids == total_unique_ids:
+                    print(f"DEBUG: Processed {processed_unique_ids}/{total_unique_ids} unique IDs ({processed_unique_ids/total_unique_ids*100:.1f}%)")
+            
+            # Now process all records in bulk with the extracted skeys
+            forecast_values = []
+            forecast_value_col = None
+            possible_forecast_cols = ['Fcst Ensemble Rev', 'ensemble', 'NHITS', 'LSTM', 'AutoARIMA', 'AutoETS', 'SeasonalNaive']
+            
+            for col in possible_forecast_cols:
+                if col in forecast_df.columns:
+                    forecast_value_col = col
+                    break
+            
+            if forecast_value_col:
+                forecast_values = forecast_df[forecast_value_col].to_list()
+            else:
+                # Fallback if no forecast column is found
+                forecast_values = [0.0] * len(forecast_df)
+            
+            # Get optional columns
+            confidence_lower = forecast_df['confidence_lower'].to_list() if 'confidence_lower' in forecast_df.columns else [None] * len(forecast_df)
+            confidence_upper = forecast_df['confidence_upper'].to_list() if 'confidence_upper' in forecast_df.columns else [None] * len(forecast_df)
+            model_versions = forecast_df['model_version'].to_list() if 'model_version' in forecast_df.columns else ['1.0'] * len(forecast_df)
+            
+            forecast_dates = forecast_df['forecast_date'].to_list()
+            unique_ids_list = forecast_df['unique_id'].to_list()
 
+            # Create all records in bulk
+            total_processed = 0
+            for i, (unique_id, item_skey, location_skey) in enumerate(zip(unique_ids_list, item_skeys, location_skeys)):
                 if item_skey is None or location_skey is None:
                     logger.warning(f"Could not find s_keys for unique_id: {unique_id}. Item_skey: {item_skey}, Location_skey: {location_skey}. Skipping row.")
                     skipped_count += 1
                     continue
 
-                # Extract forecast value for this row
-                row = forecast_df.row(i, named=True)
-                forecast_value = (row.get('Fcst Ensemble Rev', 0.0) or
-                                row.get('ensemble', 0.0) or
-                                row.get('NHITS', 0.0) or
-                                row.get('LSTM', 0.0) or
-                                row.get('AutoARIMA', 0.0) or
-                                row.get('AutoETS', 0.0) or
-                                row.get('SeasonalNaive', 0.0))
-
-                # Determine forecast horizon (same simplification as before)
-                forecast_date = row['forecast_date']
-
                 # Generate a unique forecast_id
                 forecast_id = uuid.uuid4().int & (1<<63)-1  # Generate a 63-bit integer UUID
+
+                # Calculate forecast horizon based on the difference between forecast date and current date
+                current_date = datetime.today().date()
+                forecast_date_obj = forecast_dates[i].date()
+                # Calculate the horizon in months
+                forecast_horizon = (forecast_date_obj.year - current_date.year) * 12 + (forecast_date_obj.month - current_date.month)
+                if forecast_date_obj.day < current_date.day:
+                    forecast_horizon -= 1  # Adjust if the day is earlier in the month
 
                 records_to_insert.append({
                     'forecast_id': forecast_id,
                     'item_skey': item_skey,
                     'location_skey': location_skey,
-                    'forecast_date': forecast_date.strftime('%Y-%m-%d'),  # Format date for SQL
-                    'forecast_horizon': 1,  # Assuming horizon of 1 for all records for now
+                    'forecast_date': forecast_dates[i].strftime('%Y-%m-%d'),  # Format date for SQL
+                    'forecast_horizon': max(1, forecast_horizon),  # Minimum horizon of 1, calculated based on date difference
                     'model_type': model_type,
-                    'forecast_value': forecast_value,
-                    'confidence_lower': row.get('confidence_lower'),
-                    'confidence_upper': row.get('confidence_upper'),
-                    'model_version': row.get('model_version', '1.0'),
-                    'created_date': datetime.today().strftime('%Y-%m-%d%H%M%S')
+                    'forecast_value': forecast_values[i],
+                    'confidence_lower': confidence_lower[i],
+                    'confidence_upper': confidence_upper[i],
+                    'model_version': model_versions[i],
+                    'created_at': datetime.today().strftime('%Y-%m-%d %H:%M:%S')
                 })
+                
+                total_processed += 1
+                if total_processed % 1000 == 0:
+                    print(f"DEBUG: Prepared {total_processed} records for insertion (skipped {skipped_count})")
+
+        logger.info(f"Prepared {len(records_to_insert)} records for insertion, skipped {skipped_count}")
+        print(f"DEBUG: Prepared {len(records_to_insert)} records for insertion, skipped {skipped_count} records")
+        print(f"DEBUG: Sample of data being sent: {records_to_insert[0] if records_to_insert else 'No records prepared'}")
 
         if not records_to_insert:
             logger.warning(f"No valid records to insert after processing. Skipped {skipped_count} records.")
+            print(f"DEBUG: No valid records to insert after processing.")
             return 0
-
-        logger.info(f"Prepared {len(records_to_insert)} records for insertion")
-
-        if not records_to_insert:
-            logger.warning(f"No valid records to insert after processing. Skipped {skipped_count} records.")
-            return 0
-
-        logger.info(f"Prepared {len(records_to_insert)} records for insertion")
 
         cursor = conn.cursor()
         # Set a timeout for the cursor operations
@@ -707,18 +759,24 @@ class DatabaseService:
         
         try:
             # Execute in larger batches to improve performance
-            batch_size = 1000  # Increase batch size for better performance
+            batch_size = 5000  # Increase batch size for better performance
             total_records = len(records_to_insert)
             inserted_count = 0
             
             logger.info(f"Starting batch insertion of {total_records} records with batch size {batch_size}")
+            print(f"DEBUG: Starting batch insertion of {total_records} records...")
+            
+            import time
+            start_time = time.time()
             
             for i in range(0, total_records, batch_size):
                 batch_end = min(i + batch_size, total_records)
                 batch = records_to_insert[i:batch_end]
                 
-                if i % 1000 == 0:  # Log progress every 1000 records
-                    logger.info(f"Inserting records {i+1} to {batch_end} of {total_records}")
+                if i % 5000 == 0:  # Log progress every 5000 records
+                    elapsed = time.time() - start_time
+                    records_so_far = i + len(batch)
+                    print(f"DEBUG: Inserting records {records_so_far}/{total_records} (elapsed: {elapsed:.2f}s)")
                 
                 # Prepare the batch INSERT statement
                 columns = list(batch[0].keys())
@@ -752,9 +810,12 @@ class DatabaseService:
                 cursor.executemany(insert_query, batch_values)
                 inserted_count += len(batch_values)
                     
-            logger.info(f"Successfully inserted {inserted_count} forecast records into da.forecasts. Skipped {skipped_count} records.")
+            elapsed = time.time() - start_time
+            logger.info(f"Successfully inserted {inserted_count} forecast records into da.forecasts. Skipped {skipped_count} records. Elapsed time: {elapsed:.2f}s")
+            print(f"DEBUG: Successfully inserted {inserted_count} forecast records. Elapsed time: {elapsed:.2f}s")
         except Exception as e:
             logger.error(f"Failed to insert forecasts: {e}", exc_info=True)
+            print(f"ERROR: Failed to insert forecasts: {e}")
             raise
         finally:
             logger.info("Closing database cursor")

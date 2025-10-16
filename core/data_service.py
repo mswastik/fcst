@@ -239,7 +239,7 @@ def prepare_data_for_mlforecast(df: pl.DataFrame) -> pl.DataFrame:
     return prepared_df
 
 
-def create_mlforecast_models(df: pl.DataFrame, horizon: int = 12) -> pl.DataFrame:
+def create_mlforecast_models(df: pl.DataFrame, horizon: int = 60) -> pl.DataFrame:
     """Create forecasts for each unique_id using MLForecast with parallel processing
     
     Args:
@@ -373,6 +373,12 @@ def run_mlforecast_pipeline(df: pl.DataFrame, file_path: str, state: DataState =
         # Generate forecasts with MLForecast - returns polars DataFrame
         forecast_df = create_mlforecast_models(df, horizon=60)
         
+        print(f"DEBUG: Generated forecast DataFrame with {len(forecast_df)} records")
+        if not forecast_df.is_empty():
+            print(f"DEBUG: Forecast DataFrame schema: {forecast_df.schema}")
+            print(f"DEBUG: Unique IDs in forecast: {forecast_df['unique_id'].n_unique() if 'unique_id' in forecast_df.columns else 0}")
+            print(f"DEBUG: Forecast date range: {forecast_df['forecast_date'].min() if 'forecast_date' in forecast_df.columns else 'N/A'} to {forecast_df['forecast_date'].max() if 'forecast_date' in forecast_df.columns else 'N/A'}")
+        
         if forecast_df is not None and not forecast_df.is_empty():
             # Save forecasts to database if service is available
             db_service = DatabaseUtils.get_database_service()
@@ -390,28 +396,37 @@ def run_mlforecast_pipeline(df: pl.DataFrame, file_path: str, state: DataState =
                             item_skeys = []
                             location_skeys = []
                             
-                            for parts in split_data:
-                                if len(parts) == 2:
-                                    try:
-                                        item_skey = int(parts[0])
-                                        location_skey = int(parts[1])
-                                        item_skeys.append(item_skey)
-                                        location_skeys.append(location_skey)
-                                    except (ValueError, TypeError):
-                                        item_skeys.append(None)
-                                        location_skeys.append(None)
-                                else:
-                                    item_skeys.append(None)
-                                    location_skeys.append(None)
+                            unique_ids_list = forecast_df['unique_id'].to_list()
+                            for unique_id in unique_ids_list:
+                                if isinstance(unique_id, str):
+                                    # Check if it's in item_skey_location_skey format
+                                    if '_' in unique_id:
+                                        parts = unique_id.split('_', 1)  # Split only on first underscore
+                                        if len(parts) == 2:
+                                            try:
+                                                item_skey = int(parts[0])
+                                                location_skey = int(parts[1])
+                                                item_skeys.append(item_skey)
+                                                location_skeys.append(location_skey)
+                                                continue  # Move to next unique_id
+                                            except (ValueError, TypeError):
+                                                pass  # Fall through to handle as other format
+                                    # Check if it's in Country,CatalogNumber format
+                                    elif ',' in unique_id:
+                                        pass  # Let database service handle this format
+                                # For any other format or if conversion failed
+                                item_skeys.append(None)
+                                location_skeys.append(None)
                             
                             # Add columns to polars DataFrame
                             forecast_df = forecast_df.with_columns([
-                                pl.Series('item_skey', item_skeys),
-                                pl.Series('location_skey', location_skeys)
+                                pl.Series('item_skey', item_skeys).cast(pl.Int64),
+                                pl.Series('location_skey', location_skeys).cast(pl.Int64)
                             ])
                         
                         # Insert forecasts into database
                         print(f"\n>>> Starting database insertion for {len(forecast_df)} forecast records...")
+                        print(f">>> DataFrame info: {forecast_df.shape} shape")
                         import time
                         db_start = time.time()
                         saved_count = db_service.insert_forecasts(forecast_df, model_type="MLForecast")
@@ -688,7 +703,10 @@ def ml_per_series(idf, models, horizon=60, freq='MS', lags=[3,4,5,6,12], lag_tra
         df_pandas = idf.to_pandas()
     else:
         df_pandas = idf.copy()
-    
+    try:
+        print("DF Type:"+idf.info())
+    except:
+        pass
     # Group by unique_id
     groups = [(uid, group) for uid, group in df_pandas.groupby('unique_id')]
     

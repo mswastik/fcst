@@ -53,7 +53,7 @@ def fetch_and_save_sales_actuals(user_id: str = "system"):
         ON s.MDP_Key = m.MDP_Key
 
         WHERE
-            [SALES_DATE] BETWEEN DATEADD(month, -3, GETDATE()) AND DATEADD(month, 2, GETDATE())
+            [SALES_DATE] BETWEEN DATEADD(month, -37, GETDATE()) AND DATEADD(month, 24, GETDATE())
             
         GROUP BY
             s.[item_skey],s.[Location_skey],s.[SALES_DATE]
@@ -118,6 +118,20 @@ def fetch_and_save_sales_actuals(user_id: str = "system"):
         # Write to DuckDB sales_actuals table
         # Convert to pandas first for DuckDB insert
         if not df.is_empty():
+            # Ensure numeric columns are properly typed to avoid decimal casting errors
+            numeric_columns = ['asp_final_rev', 'act_orders_rev', 'act_orders_rev_val', 
+                              'fcst_df_final_rev', 'l0_df_final_rev', 'l1_df_final_rev', 
+                              'l2_df_final_rev', 'fcst_df_final_rev_val', 'fcst_stat_prelim_rev',
+                              'fcst_stat_final_rev', 'l0_stat_final_rev', 'l1_stat_final_rev', 
+                              'l2_stat_final_rev']
+            
+            for col in numeric_columns:
+                if col in df.columns:
+                    # Convert to float to avoid decimal precision issues
+                    df = df.with_columns([
+                        pl.col(col).cast(pl.Float64, strict=False).alias(col)
+                    ])
+            
             df_pandas = df.to_pandas()
             
             # Insert the data into the DuckDB table (overwrite existing)

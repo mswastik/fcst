@@ -18,7 +18,7 @@ class DuckDBConnectionManager:
         
         # Set default database path if not provided
         if db_path is None:
-            db_path = os.path.join(os.path.expanduser("~"), "fcst", "fcst.duckdb")
+            db_path = os.path.join("db", "fcst.duckdb")
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
         

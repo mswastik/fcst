@@ -11,9 +11,10 @@ from typing import Optional, List, Dict, Any, Tuple, Callable
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import polars as pl
+import duckdb
 
 # Import the updated multi-user connection manager
-from .databricks_connection_manager import get_databricks_connection_manager
+from .duckdb_connection_manager import get_duckdb_connection_manager
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,8 @@ class DatabaseService:
     """Enhanced database service with multi-user support"""
 
     def __init__(self):
-        self.connection_manager = get_databricks_connection_manager()
-        logger.info("Enhanced Database Service initialized with multi-user support")
+        self.connection_manager = get_duckdb_connection_manager()
+        logger.info("Enhanced Database Service initialized with DuckDB multi-user support")
 
         # Define schema mapping for consistent DataFrame creation
         self.schema_mapping = {

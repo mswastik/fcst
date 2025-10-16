@@ -1,6 +1,9 @@
 -- DuckDB Schema for Forecasting Application
 -- Optimized for time series forecasting with product and location hierarchies
 
+-- Create schema if it doesn't exist
+CREATE SCHEMA IF NOT EXISTS da;
+
 -- Drop existing tables if they exist
 DROP TABLE IF EXISTS da.product_clusters;
 DROP TABLE IF EXISTS da.forecasts;
@@ -23,9 +26,6 @@ CREATE TABLE IF NOT EXISTS da.product_hierarchy (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Enable column defaults for this table
-ALTER TABLE da.product_hierarchy SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
-
 -- Location Hierarchy Table (based on lhierarchy function in sql.py)
 CREATE TABLE IF NOT EXISTS da.location_hierarchy (
     location_skey BIGINT,
@@ -37,9 +37,6 @@ CREATE TABLE IF NOT EXISTS da.location_hierarchy (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Enable column defaults for this table
-ALTER TABLE da.location_hierarchy SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
 
 -- Main Fact Table for Historical Data (based on sales_actuals function in sql.py)
 CREATE TABLE IF NOT EXISTS da.sales_actuals (
@@ -64,23 +61,17 @@ CREATE TABLE IF NOT EXISTS da.sales_actuals (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Enable column defaults for this table
-ALTER TABLE da.sales_actuals SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
-
 -- Clustering Results Table
 CREATE TABLE IF NOT EXISTS da.product_clusters (
     cluster_id VARCHAR(255),
     item_skey BIGINT NOT NULL,
     location_skey BIGINT NOT NULL,
     cluster_number INTEGER NOT NULL,
-    cluster_features STRING, -- Use STRING for JSON in Databricks
+    cluster_features VARCHAR, -- Use VARCHAR for JSON in DuckDB
     silhouette_score DECIMAL(15,6),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Enable column defaults for this table
-ALTER TABLE da.product_clusters SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
 
 -- Forecast Results Table
 CREATE TABLE IF NOT EXISTS da.forecasts (
@@ -97,9 +88,6 @@ CREATE TABLE IF NOT EXISTS da.forecasts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Enable column defaults for this table
-ALTER TABLE da.forecasts SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
-
 -- Model Performance Metrics Table
 CREATE TABLE IF NOT EXISTS da.model_validation (
     validation_id BIGINT,
@@ -112,12 +100,9 @@ CREATE TABLE IF NOT EXISTS da.model_validation (
     accuracy_percentage DECIMAL(5,2),
     forecast_bias DECIMAL(10,4),
     silhouette_score DECIMAL(15,6),
-    validation_details STRING, -- Use STRING for JSON in Databricks
+    validation_details VARCHAR, -- Use VARCHAR for JSON in DuckDB
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Enable column defaults for this table
-ALTER TABLE da.model_validation SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
 
 -- Final Forecasts Table (for approved forecasts only)
 CREATE TABLE IF NOT EXISTS da.final_forecasts (
@@ -140,9 +125,6 @@ CREATE TABLE IF NOT EXISTS da.final_forecasts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Enable column defaults for this table
-ALTER TABLE da.final_forecasts SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported');
 
 -- Indexes for Performance
 CREATE INDEX idx_sales_actuals_date ON da.sales_actuals(sales_date);
@@ -185,7 +167,6 @@ CREATE UNIQUE INDEX idx_product_clusters_unique ON da.product_clusters(item_skey
 
 -- Composite indexes for common filter combinations
 CREATE INDEX idx_sales_product_location_date ON da.sales_actuals(item_skey, location_skey, sales_date);
-CREATE INDEX idx_product_location_franchise_region ON da.product_hierarchy(franchise), da.location_hierarchy(region);
 
 -- Views for Common Queries
 CREATE OR REPLACE VIEW v_product_location_summary AS
@@ -269,3 +250,13 @@ JOIN da.location_hierarchy l ON s.location_skey = l.location_skey
 LEFT JOIN da.product_clusters c ON s.item_skey = c.item_skey 
     AND s.location_skey = c.location_skey
 ORDER BY s.item_skey, s.location_skey, s.sales_date;
+
+-- Initialize default tables if they don't exist with sample data
+-- This can be used for first-time setup
+INSERT INTO da.product_hierarchy (demantra_item_skey, business_sector, business_unit, franchise, product_line, ibp_level_5, ibp_level_6, ibp_level_7, catalog_number, uom, pack_content) 
+SELECT 1, 'Orthopedics', 'Knee', 'Knee Solutions', 'Knee Replacement', 'Knee Solutions', 'Knee Replacement', 'Knee Implant', 'KNEE001', 'EA', 'Single Pack'
+WHERE NOT EXISTS (SELECT 1 FROM da.product_hierarchy WHERE demantra_item_skey = 1);
+
+INSERT INTO da.location_hierarchy (location_skey, selling_division, area, stryker_group_region, region, country) 
+SELECT 1, 'US', 'North America', 'NA', 'US', 'USA'
+WHERE NOT EXISTS (SELECT 1 FROM da.location_hierarchy WHERE location_skey = 1);

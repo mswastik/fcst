@@ -311,13 +311,14 @@ def fetch_and_save_product_hierarchy(user_id: str = "system"):
         if not df.is_empty():
             df_pandas = df.to_pandas()
             
-            # Use a transaction to ensure atomic operation
-            conn.execute("BEGIN TRANSACTION")
+            # First, clear existing data
+            conn.execute("DELETE FROM da.product_hierarchy")
+            
+            # Register the DataFrame as a temporary table
+            conn.register("temp_product_hierarchy", df_pandas)
+            
             try:
-                # Clear existing data
-                conn.execute("DELETE FROM da.product_hierarchy")
-                # Insert the new deduplicated data
-                conn.register("df_pandas", df_pandas)  # Register the DataFrame as a temporary table
+                # Insert the deduplicated data into the product_hierarchy table
                 conn.execute("""
                     INSERT INTO da.product_hierarchy 
                     (demantra_item_skey, business_sector, business_unit, franchise, product_line, 
@@ -327,13 +328,11 @@ def fetch_and_save_product_hierarchy(user_id: str = "system"):
                         demantra_item_skey, business_sector, business_unit, franchise, product_line, 
                         ibp_level_5, ibp_level_6, ibp_level_7, catalog_number, uom, pack_content,
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                    FROM df_pandas
+                    FROM temp_product_hierarchy
                 """)
-                conn.unregister("df_pandas")  # Unregister the temporary table
-                conn.execute("COMMIT")
-            except Exception as e:
-                conn.execute("ROLLBACK")
-                raise e
+            finally:
+                # Unregister the temporary table
+                conn.unregister("temp_product_hierarchy")
         
         print(f"Successfully inserted {len(df)} records into da.product_hierarchy table")
         return df

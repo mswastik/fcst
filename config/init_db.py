@@ -9,10 +9,11 @@ def initialize_database(db_path: str = None):
     """Initialize the DuckDB database with required schema"""
     # Use default path if none provided
     if db_path is None:
-        db_path = os.path.join("fcst.duckdb")
+        #db_path = os.path.join("fcst.duckdb")
+        db_path = "fcst.duckdb"
     
     # Create directory if it doesn't exist
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    #os.makedirs(os.path.dirname(db_path), exist_ok=True)
     
     print(f"Initializing database at: {db_path}")
     

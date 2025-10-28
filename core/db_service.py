@@ -116,7 +116,6 @@ class DatabaseService:
                         # If timezone conversion fails, convert to string
                         df = df.with_columns(pl.col(col).cast(pl.Utf8))
 
-            cursor.close()
             return df
 
         except Exception as e:

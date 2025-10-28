@@ -353,10 +353,10 @@ class DatabaseService:
                 # Single query to get all product hierarchy data
                 product_hierarchy_query = """
                 SELECT 
-                    ARRAY_AGG(DISTINCT franchise) FILTER (WHERE franchise IS NOT NULL) as franchises,
-                    ARRAY_AGG(DISTINCT ibp_level_5) FILTER (WHERE ibp_level_5 IS NOT NULL) as ibp_level_5s,
-                    ARRAY_AGG(DISTINCT ibp_level_6) FILTER (WHERE ibp_level_6 IS NOT NULL) as ibp_level_6s,
-                    ARRAY_AGG(DISTINCT catalog_number) FILTER (WHERE catalog_number IS NOT NULL) as catalog_numbers
+                    ARRAY_AGG(DISTINCT "Franchise") FILTER (WHERE "Franchise" IS NOT NULL) as franchises,
+                    ARRAY_AGG(DISTINCT "IBP_Level_5") FILTER (WHERE "IBP_Level_5" IS NOT NULL) as ibp_level_5s,
+                    ARRAY_AGG(DISTINCT "IBP_Level_6") FILTER (WHERE "IBP_Level_6" IS NOT NULL) as ibp_level_6s,
+                    ARRAY_AGG(DISTINCT "catalog_number") FILTER (WHERE "catalog_number" IS NOT NULL) as catalog_numbers
                 FROM da.product_hierarchy
                 """
                 

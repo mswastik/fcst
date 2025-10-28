@@ -95,16 +95,14 @@ class DatabaseService:
             conn = self.connection_manager.get_user_connection(user_id)
 
         try:
-            cursor = conn.cursor()
-            # Set a timeout for the cursor operations
+            # Execute query directly on connection (DuckDB supports this)
             if params:
-                cursor.execute(query, params)
+                df_result = conn.execute(query, params).fetchdf()
             else:
-                cursor.execute(query)
-
-            # Use Arrow format for direct conversion to Polars
-            arrow_table = cursor.fetchall_arrow()
-            df = pl.from_arrow(arrow_table)
+                df_result = conn.execute(query).fetchdf()
+            
+            # Convert to Polars DataFrame
+            df = pl.from_pandas(df_result)
 
             # Handle any remaining datetime timezone issues
             for col in df.columns:

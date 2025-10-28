@@ -130,12 +130,18 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
         '''
         
         try:
+            print(f"Starting to read batches for bucket {current_start} to {current_end}")
             reader = read_arrow_batches_from_odbc(query=bucket_query, connection_string=connection_string)
             batch_count = 0
+            total_rows_processed = 0
             
             for batch in reader:
                 # Process each batch directly without accumulating in memory
+                print(f"Processing batch {batch_count + 1}")
                 batch_df = pl.from_arrow(batch)
+                current_batch_rows = len(batch_df)
+                total_rows_processed += current_batch_rows
+                print(f"Batch {batch_count + 1} has {current_batch_rows} rows")
                 
                 # Convert SALES_DATE to proper datetime format if needed
                 if 'SALES_DATE' in batch_df.columns:
@@ -207,10 +213,12 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
                     """)
                     # Unregister the temporary table
                     conn.unregister("batch_pandas")
+                    print(f"Inserted batch {batch_count + 1} with {current_batch_rows} rows to DuckDB")
                 
                 batch_count += 1
             
             print(f"Retrieved data from bucket {current_start} to {current_end} in {batch_count} batches")
+            print(f"Total rows processed in this bucket: {total_rows_processed}")
             
             processed_buckets += 1
             print(f"Completed bucket {processed_buckets}.")

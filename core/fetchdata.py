@@ -70,11 +70,23 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
     if bucket_size_months <= 0:
         bucket_size_months = 1
     
-    all_data = pl.DataFrame()
-    
     # Process data in buckets
     current_start = start_date
     processed_buckets = 0
+    
+    # Handle deletion before inserting new data
+    if incremental:
+        # For incremental updates, delete only the overlapping period
+        conn.execute(f"""
+            DELETE FROM da.sales_actuals 
+            WHERE sales_date BETWEEN '{start_date.strftime('%Y-%m-%d')}' 
+            AND '{end_date.strftime('%Y-%m-%d')}'
+        """)
+        print(f"Deleted {start_date} to {end_date} period for incremental update")
+    else:
+        # For full data load, delete all existing data
+        conn.execute("DELETE FROM da.sales_actuals")
+        print("Deleted all existing sales_actuals data")
     
     while current_start < end_date:
         # Calculate end date for this bucket
@@ -173,11 +185,33 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
                         pl.col(col).cast(pl.Float64, strict=False).alias(col)
                     ])
             
-            # Concatenate this bucket to the overall dataset
-            all_data = pl.concat([all_data, bucket_df])
+            if not bucket_df.is_empty():
+                # Write this bucket directly to DuckDB
+                bucket_pandas = bucket_df.to_pandas()
+                
+                # Register the DataFrame as a temporary table
+                conn.register("bucket_pandas", bucket_pandas)
+                
+                # Insert the data into the DuckDB table
+                conn.execute("""
+                    INSERT INTO da.sales_actuals 
+                    (item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
+                     fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
+                     fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
+                     l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, created_at, updated_at)
+                    SELECT 
+                        item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
+                        fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
+                        fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
+                        l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, 
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    FROM bucket_pandas
+                """)
+                # Unregister the temporary table
+                conn.unregister("bucket_pandas")
             
             processed_buckets += 1
-            print(f"Completed bucket {processed_buckets}. Total records so far: {len(all_data)}")
+            print(f"Completed bucket {processed_buckets}. Records in this bucket: {len(bucket_df)}")
             
         except Exception as e:
             print(f"Error processing bucket {current_start} to {current_end}: {e}")
@@ -188,45 +222,10 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
         # Move to next bucket
         current_start = current_end + relativedelta(days=1)
     
-    print(f"Successfully retrieved {len(all_data)} total records from {processed_buckets} buckets")
+    print(f"Successfully processed {processed_buckets} buckets")
     
-    # Insert the combined data into DuckDB sales_actuals table
-    if not all_data.is_empty():
-        all_data_pandas = all_data.to_pandas()
-        
-        if incremental:
-            # For incremental updates, delete only the overlapping period
-            conn.execute(f"""
-                DELETE FROM da.sales_actuals 
-                WHERE sales_date BETWEEN '{start_date.strftime('%Y-%m-%d')}' 
-                AND '{end_date.strftime('%Y-%m-%d')}'
-            """)
-            print(f"Deleted {start_date} to {end_date} period for incremental update")
-        else:
-            # For full data load, delete all existing data
-            conn.execute("DELETE FROM da.sales_actuals")
-            print("Deleted all existing sales_actuals data")
-        
-        # Insert the data into the DuckDB table
-        conn.register("all_data_pandas", all_data_pandas)  # Register the DataFrame as a temporary table
-        conn.execute("""
-            INSERT INTO da.sales_actuals 
-            (item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
-             fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
-             fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
-             l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, created_at, updated_at)
-            SELECT 
-                item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
-                fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
-                fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
-                l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, 
-                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-            FROM all_data_pandas
-        """)
-        conn.unregister("all_data_pandas")  # Unregister the temporary table
-    
-    print(f"Successfully inserted {len(all_data)} records into da.sales_actuals table")
-    return all_data
+    # Return an empty DataFrame since we're now writing data directly to DuckDB
+    return pl.DataFrame()
 
 
 def fetch_and_save_product_hierarchy(user_id: str = "system"):

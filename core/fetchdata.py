@@ -51,7 +51,7 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
     # Determine date range based on incremental flag
     if incremental:
         # For incremental updates: from today to 24 months ahead
-        start_date = datetime.today().date()
+        start_date = datetime.today().date() - relativedelta(months=3)
         end_date = start_date + relativedelta(months=24)
         print(f"Running incremental update for date range: {start_date} to {end_date}")
     else:
@@ -131,87 +131,89 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
         
         try:
             reader = read_arrow_batches_from_odbc(query=bucket_query, connection_string=connection_string)
-            bucket_df = pl.DataFrame()
+            batch_count = 0
             
             for batch in reader:
+                # Process each batch directly without accumulating in memory
                 batch_df = pl.from_arrow(batch)
-                bucket_df = pl.concat([bucket_df, batch_df])
-            
-            print(f"Retrieved {len(bucket_df)} records from bucket: {current_start} to {current_end}")
-            
-            # Convert SALES_DATE to proper datetime format if needed
-            if 'SALES_DATE' in bucket_df.columns:
-                bucket_df = bucket_df.with_columns(
-                    pl.col('SALES_DATE').cast(pl.Datetime).dt.replace_time_zone(None)
-                )
-            
-            # Prepare the data for insertion into DuckDB
-            # Rename columns to match DuckDB schema
-            rename_mapping = {
-                'SALES_DATE': 'sales_date',
-                'item_skey': 'item_skey',
-                'Location_skey': 'location_skey',
-                'asp_final_rev': 'asp_final_rev',
-                'act_orders_rev': 'act_orders_rev',
-                'act_orders_rev_val': 'act_orders_rev_val',
-                'fcst_df_final_rev': 'fcst_df_final_rev',
-                'l0_df_final_rev': 'l0_df_final_rev',
-                'l1_df_final_rev': 'l1_df_final_rev',
-                'l2_df_final_rev': 'l2_df_final_rev',
-                'fcst_df_final_rev_val': 'fcst_df_final_rev_val',
-                'fcst_stat_prelim_rev': 'fcst_stat_prelim_rev',
-                'fcst_stat_final_rev': 'fcst_stat_final_rev',
-                'l0_stat_final_rev': 'l0_stat_final_rev',
-                'l1_stat_final_rev': 'l1_stat_final_rev',
-                'l2_stat_final_rev': 'l2_stat_final_rev'
-            }
-            
-            # Rename columns that exist in the dataframe
-            for old_name, new_name in rename_mapping.items():
-                if old_name in bucket_df.columns:
-                    bucket_df = bucket_df.rename({old_name: new_name})
-            
-            # Ensure numeric columns are properly typed to avoid decimal casting errors
-            numeric_columns = ['asp_final_rev', 'act_orders_rev', 'act_orders_rev_val', 
-                              'fcst_df_final_rev', 'l0_df_final_rev', 'l1_df_final_rev', 
-                              'l2_df_final_rev', 'fcst_df_final_rev_val', 'fcst_stat_prelim_rev',
-                              'fcst_stat_final_rev', 'l0_stat_final_rev', 'l1_stat_final_rev', 
-                              'l2_stat_final_rev']
-            
-            for col in numeric_columns:
-                if col in bucket_df.columns:
-                    # Convert to float to avoid decimal precision issues
-                    bucket_df = bucket_df.with_columns([
-                        pl.col(col).cast(pl.Float64, strict=False).alias(col)
-                    ])
-            
-            if not bucket_df.is_empty():
-                # Write this bucket directly to DuckDB
-                bucket_pandas = bucket_df.to_pandas()
                 
-                # Register the DataFrame as a temporary table
-                conn.register("bucket_pandas", bucket_pandas)
+                # Convert SALES_DATE to proper datetime format if needed
+                if 'SALES_DATE' in batch_df.columns:
+                    batch_df = batch_df.with_columns(
+                        pl.col('SALES_DATE').cast(pl.Datetime).dt.replace_time_zone(None)
+                    )
                 
-                # Insert the data into the DuckDB table
-                conn.execute("""
-                    INSERT INTO da.sales_actuals 
-                    (item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
-                     fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
-                     fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
-                     l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, created_at, updated_at)
-                    SELECT 
-                        item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
-                        fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
-                        fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
-                        l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, 
-                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                    FROM bucket_pandas
-                """)
-                # Unregister the temporary table
-                conn.unregister("bucket_pandas")
+                # Prepare the data for insertion into DuckDB
+                # Rename columns to match DuckDB schema
+                rename_mapping = {
+                    'SALES_DATE': 'sales_date',
+                    'item_skey': 'item_skey',
+                    'Location_skey': 'location_skey',
+                    'asp_final_rev': 'asp_final_rev',
+                    'act_orders_rev': 'act_orders_rev',
+                    'act_orders_rev_val': 'act_orders_rev_val',
+                    'fcst_df_final_rev': 'fcst_df_final_rev',
+                    'l0_df_final_rev': 'l0_df_final_rev',
+                    'l1_df_final_rev': 'l1_df_final_rev',
+                    'l2_df_final_rev': 'l2_df_final_rev',
+                    'fcst_df_final_rev_val': 'fcst_df_final_rev_val',
+                    'fcst_stat_prelim_rev': 'fcst_stat_prelim_rev',
+                    'fcst_stat_final_rev': 'fcst_stat_final_rev',
+                    'l0_stat_final_rev': 'l0_stat_final_rev',
+                    'l1_stat_final_rev': 'l1_stat_final_rev',
+                    'l2_stat_final_rev': 'l2_stat_final_rev'
+                }
+                
+                # Rename columns that exist in the dataframe
+                for old_name, new_name in rename_mapping.items():
+                    if old_name in batch_df.columns:
+                        batch_df = batch_df.rename({old_name: new_name})
+                
+                # Ensure numeric columns are properly typed to avoid decimal casting errors
+                numeric_columns = ['asp_final_rev', 'act_orders_rev', 'act_orders_rev_val', 
+                                  'fcst_df_final_rev', 'l0_df_final_rev', 'l1_df_final_rev', 
+                                  'l2_df_final_rev', 'fcst_df_final_rev_val', 'fcst_stat_prelim_rev',
+                                  'fcst_stat_final_rev', 'l0_stat_final_rev', 'l1_stat_final_rev', 
+                                  'l2_stat_final_rev']
+                
+                for col in numeric_columns:
+                    if col in batch_df.columns:
+                        # Convert to float to avoid decimal precision issues
+                        batch_df = batch_df.with_columns([
+                            pl.col(col).cast(pl.Float64, strict=False).alias(col)
+                        ])
+                
+                if not batch_df.is_empty():
+                    # Write this batch directly to DuckDB
+                    batch_pandas = batch_df.to_pandas()
+                    
+                    # Register the DataFrame as a temporary table
+                    conn.register("batch_pandas", batch_pandas)
+                    
+                    # Insert the data into the DuckDB table
+                    conn.execute("""
+                        INSERT INTO da.sales_actuals 
+                        (item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
+                         fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
+                         fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
+                         l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, created_at, updated_at)
+                        SELECT 
+                            item_skey, location_skey, sales_date, asp_final_rev, act_orders_rev, act_orders_rev_val,
+                            fcst_df_final_rev, l0_df_final_rev, l1_df_final_rev, l2_df_final_rev, 
+                            fcst_df_final_rev_val, fcst_stat_prelim_rev, fcst_stat_final_rev, 
+                            l0_stat_final_rev, l1_stat_final_rev, l2_stat_final_rev, 
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        FROM batch_pandas
+                    """)
+                    # Unregister the temporary table
+                    conn.unregister("batch_pandas")
+                
+                batch_count += 1
+            
+            print(f"Retrieved data from bucket {current_start} to {current_end} in {batch_count} batches")
             
             processed_buckets += 1
-            print(f"Completed bucket {processed_buckets}. Records in this bucket: {len(bucket_df)}")
+            print(f"Completed bucket {processed_buckets}.")
             
         except Exception as e:
             print(f"Error processing bucket {current_start} to {current_end}: {e}")

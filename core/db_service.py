@@ -86,13 +86,33 @@ class DatabaseService:
             'CatalogNumber': 'catalog_number'
         }
 
-        # Auto-create connection if it doesn't exist
-        try:
-            conn = self.connection_manager.get_user_connection(user_id)
-        except ValueError:
-            # Connection doesn't exist, create it
-            self.connection_manager.create_user_connection(user_id)
-            conn = self.connection_manager.get_user_connection(user_id)
+        # Use a temporary direct connection to avoid locking issues
+        import duckdb
+        from time import sleep
+        import random
+        
+        max_retries = 3
+        retry_delay = 0.05
+        
+        conn = None
+        for attempt in range(max_retries):
+            try:
+                conn = duckdb.connect(self.connection_manager._db_path)
+                break
+            except Exception as e:
+                error_msg = str(e)
+                if "The process cannot access the file because it is being used by another process" in error_msg or "IO Error" in error_msg:
+                    if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                        sleep_time = retry_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                        print(f"Database file locked during query, retrying in {sleep_time:.2f}s... (attempt {attempt + 1}/{max_retries})")
+                        sleep(sleep_time)
+                        continue
+                    else:
+                        print(f"Failed to create query connection after {max_retries} attempts: {e}")
+                        raise
+                else:
+                    print(f"Failed to create query connection: {e}")
+                    raise
 
         try:
             # Execute query directly on connection (DuckDB supports this)
@@ -121,19 +141,69 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Query execution failed for user {user_id}: {e}")
             raise
+        finally:
+            # Always close the temporary connection
+            if conn:
+                conn.close()
 
     def execute_query_raw(self, query: str, params: Optional[tuple] = None, user_id: Optional[str] = None):
         """Execute a query and return raw cursor results"""
         if not user_id:
             raise ValueError("user_id is required for multi-user operation")
 
-        conn = self.connection_manager.get_user_connection(user_id)
+        # Use a temporary direct connection to avoid locking issues
+        import duckdb
+        from contextlib import contextmanager
+        from time import sleep
+        import random
+        
+        max_retries = 3
+        retry_delay = 0.05
+        
+        conn = None
+        for attempt in range(max_retries):
+            try:
+                conn = duckdb.connect(self.connection_manager._db_path)
+                break
+            except Exception as e:
+                error_msg = str(e)
+                if "The process cannot access the file because it is being used by another process" in error_msg or "IO Error" in error_msg:
+                    if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                        sleep_time = retry_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                        print(f"Database file locked during raw query, retrying in {sleep_time:.2f}s... (attempt {attempt + 1}/{max_retries})")
+                        sleep(sleep_time)
+                        continue
+                    else:
+                        print(f"Failed to create raw query connection after {max_retries} attempts: {e}")
+                        raise
+                else:
+                    print(f"Failed to create raw query connection: {e}")
+                    raise
+
         cursor = conn.cursor()
         if params:
             cursor.execute(query, params)
         else:
             cursor.execute(query)
+        
+        # We'll still return both cursor and connection for proper cleanup
+        # But also provide a close method for the caller
+        cursor._temp_conn = conn  # Attach connection to cursor for cleanup
         return cursor
+
+    def close_cursor_and_connection(self, cursor):
+        """Helper method to close cursor and its associated connection"""
+        try:
+            cursor.close()
+        except:
+            pass  # Cursor might already be closed
+        
+        # Close the associated temporary connection
+        if hasattr(cursor, '_temp_conn') and cursor._temp_conn:
+            try:
+                cursor._temp_conn.close()
+            except:
+                pass  # Connection might already be closed
 
     def get_sales_actuals(self, filters: Optional[Dict] = None, limit: Optional[int] = None, user_id: Optional[str] = None) -> pl.DataFrame:
         """Get sales actuals data for a specific user"""
@@ -176,12 +246,6 @@ class DatabaseService:
         """Estimate the number of rows that would be returned with given filters"""
         if not user_id:
             user_id = "system"
-
-        # Auto-create connection if it doesn't exist
-        try:
-            self.connection_manager.get_user_connection(user_id)
-        except ValueError:
-            self.connection_manager.create_user_connection(user_id)
 
         # Build WHERE conditions
         where_conditions = []
@@ -226,12 +290,6 @@ class DatabaseService:
         """Get filtered sales actuals data for a specific user"""
         if not user_id:
             user_id = "system"
-
-        # Auto-create connection if it doesn't exist
-        try:
-            self.connection_manager.get_user_connection(user_id)
-        except ValueError:
-            self.connection_manager.create_user_connection(user_id)
 
         # Build WHERE conditions
         where_conditions = []
@@ -340,14 +398,6 @@ class DatabaseService:
             logger.info(f"Refreshing filter options for user {user_id}")
 
             try:
-                # Get or create connection
-                try:
-                    logger.debug(f"Getting connection for user {user_id}")
-                    self.connection_manager.get_user_connection(user_id)
-                except ValueError as ve:
-                    logger.warning(f"Creating new connection for user {user_id}: {ve}")
-                    self.connection_manager.create_user_connection(user_id)
-
                 options = {}
                 
                 # Single query to get all product hierarchy data
@@ -523,16 +573,37 @@ class DatabaseService:
             print("DEBUG: No forecast data to insert.")
             return 0
 
-        # Auto-create connection if it doesn't exist
-        try:
-            conn = self.connection_manager.get_user_connection(user_id)
-            logger.info("Database connection established")
-        except ValueError:
-            # Connection doesn't exist, create it
-            logger.info(f"Creating new database connection for user: {user_id}")
-            self.connection_manager.create_user_connection(user_id)
-            conn = self.connection_manager.get_user_connection(user_id)
-            logger.info("New database connection created")
+        # For forecast insertion, use a temporary direct connection to avoid locking issues
+        import duckdb
+        from time import sleep
+        import random
+        
+        max_retries = 5
+        retry_delay = 0.1
+        
+        conn = None
+        for attempt in range(max_retries):
+            try:
+                conn = duckdb.connect(self.connection_manager._db_path)
+                logger.info("Database connection established for forecast insertion")
+                break
+            except Exception as e:
+                error_msg = str(e)
+                if "The process cannot access the file because it is being used by another process" in error_msg or "IO Error" in error_msg:
+                    if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                        sleep_time = retry_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                        print(f"Database file locked, retrying in {sleep_time:.2f}s... (attempt {attempt + 1}/{max_retries})")
+                        sleep(sleep_time)
+                        continue
+                    else:
+                        print(f"Failed to create connection after {max_retries} attempts: {e}")
+                        raise
+                else:
+                    print(f"Failed to create connection for forecast insertion: {e}")
+                    raise
+        
+        # Store connection reference for use in finally block
+        self._temp_conn = conn
 
         # Ensure forecast_date is present and correctly typed (handle different possible column names)
         date_column_found = False
@@ -816,8 +887,11 @@ class DatabaseService:
             print(f"ERROR: Failed to insert forecasts: {e}")
             raise
         finally:
-            logger.info("Closing database cursor")
+            logger.info("Closing database cursor and connection")
             cursor.close()
+            # Close the temporary connection if we created one
+            if conn:
+                conn.close()
 
         return inserted_count
 

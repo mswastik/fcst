@@ -35,3 +35,4 @@ forecasting2.duckdb
 .env
 .windsurf
 fcst.duckdb
+fcst.duckdb.wal

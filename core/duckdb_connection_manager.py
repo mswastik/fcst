@@ -25,35 +25,53 @@ class DuckDBConnectionManager:
 
     def create_user_connection(self, user_id: str) -> str:
         """Create a new database connection for a specific user"""
+        from time import sleep
+        import random
+        
         with self._lock:
             if user_id in self._connections:
                 # Check if existing connection is still alive
                 if self._is_connection_alive(user_id):
                     return user_id
 
-            # Create new connection for user
-            try:
-                connection = duckdb.connect(self._db_path)
-                
-                # Register pandas if available
+            # Create new connection for user with retry logic for file locking
+            max_retries = 5
+            retry_delay = 0.1  # Start with 100ms
+            
+            for attempt in range(max_retries):
                 try:
-                    import pandas as pd
-                    connection.register('pandas', pd.DataFrame())
-                except:
-                    pass
-                
-                self._connections[user_id] = {
-                    'connection': connection,
-                    'created_at': time.time(),
-                    'last_used': time.time(),
-                    'thread_id': threading.current_thread().ident
-                }
+                    connection = duckdb.connect(self._db_path)
+                    
+                    # Register pandas if available
+                    try:
+                        import pandas as pd
+                        connection.register('pandas', pd.DataFrame())
+                    except:
+                        pass
+                    
+                    self._connections[user_id] = {
+                        'connection': connection,
+                        'created_at': time.time(),
+                        'last_used': time.time(),
+                        'thread_id': threading.current_thread().ident
+                    }
 
-                return user_id
+                    return user_id
 
-            except Exception as e:
-                print(f"Failed to create connection for user {user_id}: {e}")
-                raise
+                except Exception as e:
+                    error_msg = str(e)
+                    if "The process cannot access the file because it is being used by another process" in error_msg or "IO Error" in error_msg:
+                        if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                            sleep_time = retry_delay * (2 ** attempt) + random.uniform(0, 0.1)  # Exponential backoff + jitter
+                            print(f"Database file locked, retrying in {sleep_time:.2f}s... (attempt {attempt + 1}/{max_retries})")
+                            sleep(sleep_time)
+                            continue
+                        else:
+                            print(f"Failed to create connection after {max_retries} attempts: {e}")
+                            raise
+                    else:
+                        print(f"Failed to create connection for user {user_id}: {e}")
+                        raise
 
     def get_user_connection(self, user_id: str):
         """Get the database connection for a specific user"""
@@ -65,13 +83,29 @@ class DuckDBConnectionManager:
 
             # Check if connection is still alive
             if not self._is_connection_alive(user_id):
-                # Recreate connection
-                try:
-                    conn_data['connection'] = duckdb.connect(self._db_path)
-                    conn_data['created_at'] = time.time()
-                except Exception as e:
-                    print(f"Failed to recreate connection for user {user_id}: {e}")
-                    raise
+                # Recreate connection with retry logic for file locking
+                max_retries = 3
+                retry_delay = 0.1
+                
+                for attempt in range(max_retries):
+                    try:
+                        conn_data['connection'] = duckdb.connect(self._db_path)
+                        conn_data['created_at'] = time.time()
+                        break
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "The process cannot access the file because it is being used by another process" in error_msg or "IO Error" in error_msg:
+                            if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                                sleep_time = retry_delay * (2 ** attempt)
+                                print(f"Database file locked during recreation, retrying in {sleep_time:.2f}s... (attempt {attempt + 1}/{max_retries})")
+                                time.sleep(sleep_time)
+                                continue
+                            else:
+                                print(f"Failed to recreate connection after {max_retries} attempts: {e}")
+                                raise
+                        else:
+                            print(f"Failed to recreate connection for user {user_id}: {e}")
+                            raise
 
             # Update last used timestamp
             conn_data['last_used'] = time.time()

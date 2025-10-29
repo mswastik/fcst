@@ -52,12 +52,12 @@ def fetch_and_save_sales_actuals(user_id: str = "system", incremental: bool = Fa
     if incremental:
         # For incremental updates: from today to 24 months ahead
         start_date = datetime.today().date() - relativedelta(months=3)
-        end_date = start_date + relativedelta(months=24)
+        end_date = start_date + relativedelta(months=36)
         print(f"Running incremental update for date range: {start_date} to {end_date}")
     else:
         # For full data load: from 37 months ago to 24 months ahead
-        start_date = datetime.today().date() - relativedelta(months=6)
-        end_date = datetime.today().date() + relativedelta(months=2)
+        start_date = datetime.today().date() - relativedelta(months=37)
+        end_date = datetime.today().date() + relativedelta(months=36)
         print(f"Running full data load for date range: {start_date} to {end_date}")
     
     # Calculate the total date range span in months

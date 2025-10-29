@@ -264,17 +264,21 @@ def create_dashboard():
         
         if filter_name == 'location1':
             filter_components.location_select2._props.update({'label': value})
-            options = get_filter_options(
+            # Update location options based on current product filter
+            options = state.get_filter_options(
                 filter_state.get('product1'), filter_state.get('location1')
-            )['locations_filt']
-            filter_components.update_location_options(options)
+            )
+            if 'locations_filt' in options:
+                filter_components.update_location_options(options['locations_filt'])
         
         if filter_name == 'product1':
             filter_components.product_select2._props.update({'label': value})
-            options = get_filter_options(
-                filter_state.get('product1'), filter_state.get('location1')
-            )['products_filt']
-            filter_components.update_product_options(options)
+            # Update product options based on current location filter
+            options = state.get_filter_options(
+                value, filter_state.get('location1')  # Use the new value for product1
+            )
+            if 'products_filt' in options:
+                filter_components.update_product_options(options['products_filt'])
         
     async def process_filter_change(filter_state):
         """Process location/product/level filter changes"""

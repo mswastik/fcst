@@ -200,15 +200,19 @@ def create_dashboard():
         elif filter_name == 'product1':
             # Update product options when product1 changes
             try:
-                options = state.get_filter_options(
-                    value,  # The new product1 value
-                    filter_state.get('location1', 'Region')
-                )
-                if 'products_filt' in options:
-                    filter_components.update_product_options(options['products_filt'])
-                    print(f"DEBUG: Updated product options with {len(options['products_filt'])} items")
+                # When product1 changes, get the available products for the selected location type
+                # Use the new cross-filtered method for better results
+                products_filt = get_cross_filtered_options(value, filter_state.get('location1', 'Region'))
+                
+                filter_components.update_product_options(products_filt)
+                print(f"DEBUG: Updated product options with {len(products_filt)} items")
                 
                 # Update level options based on the new filters
+                # Also use state.get_filter_options to get level options
+                options = state.get_filter_options(
+                    value,  # The new product1 value
+                    filter_state.get('location1', 'Region')  # The currently selected location type
+                )
                 if 'levels' in options:
                     filter_components.update_level_options(options['levels'])
                     
@@ -262,23 +266,71 @@ def create_dashboard():
             print("DEBUG: Processing data file change")
             await process_data_file_change(value)
         
-        if filter_name == 'location1':
-            filter_components.location_select2._props.update({'label': value})
-            # Update location options based on current product filter
-            options = state.get_filter_options(
-                filter_state.get('product1'), filter_state.get('location1')
-            )
-            if 'locations_filt' in options:
-                filter_components.update_location_options(options['locations_filt'])
-        
-        if filter_name == 'product1':
-            filter_components.product_select2._props.update({'label': value})
-            # Update product options based on current location filter
-            options = state.get_filter_options(
-                value, filter_state.get('location1')  # Use the new value for product1
-            )
-            if 'products_filt' in options:
-                filter_components.update_product_options(options['products_filt'])
+        # The duplicate updates at the end have been removed to prevent conflicts
+
+
+    def get_cross_filtered_options(product_type: str, location_type: str):
+        """Get product options filtered by location type from database"""
+        try:
+            db_service = DatabaseUtils.get_database_service()
+            if db_service is None:
+                return []
+            
+            # Map display names to database column names
+            column_mapping = {
+                'Region': 'region',
+                'Country': 'country',
+                'Area': 'area',
+                'Franchise': 'franchise',
+                'IBP Level 5': 'ibp_level_5',
+                'IBP Level 6': 'ibp_level_6',
+                'CatalogNumber': 'catalog_number'
+            }
+            
+            # Get the corresponding database column names
+            db_product_col = column_mapping.get(product_type, product_type.lower().replace(' ', '_'))
+            db_location_col = column_mapping.get(location_type, location_type.lower().replace(' ', '_'))
+            
+            # Query to get distinct products for the specified location type
+            query = f"""
+            SELECT DISTINCT ph.{db_product_col}
+            FROM da.sales_actuals sa
+            JOIN da.product_hierarchy ph ON sa.item_skey = ph.demantra_item_skey
+            JOIN da.location_hierarchy lh ON sa.location_skey = lh.location_skey
+            WHERE ph.{db_product_col} IS NOT NULL
+            AND lh.{db_location_col} IS NOT NULL
+            """
+            
+            result_df = db_service.execute_query(query, user_id="system")
+            
+            if result_df is not None and not result_df.is_empty():
+                # Extract values, filtering out nulls
+                values = [x for x in result_df[db_product_col].unique().to_list() if x is not None]
+                return values
+            else:
+                return []
+                
+        except Exception as e:
+            print(f"Error getting cross-filtered options: {e}")
+            # Fallback: return all possible values for the product type
+            try:
+                db_service = DatabaseUtils.get_database_service()
+                if db_service:
+                    filter_options = db_service.get_filter_options()
+                    
+                    prod_key = 'catalog_numbers'  # Default
+                    if product_type == 'Franchise':
+                        prod_key = 'franchises'
+                    elif product_type == 'IBP Level 5':
+                        prod_key = 'ibp_level_5s'
+                    elif product_type == 'IBP Level 6':
+                        prod_key = 'ibp_level_6s'
+                    elif product_type == 'CatalogNumber':
+                        prod_key = 'catalog_numbers'
+                    
+                    return filter_options.get(prod_key, [])
+            except:
+                return []
         
     async def process_filter_change(filter_state):
         """Process location/product/level filter changes"""

@@ -34,3 +34,4 @@ forecasting2.duckdb
 .env.example
 .env
 .windsurf
+fcst.duckdb

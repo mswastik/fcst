@@ -109,17 +109,18 @@ except Exception as e:
 #### Solutions
 1. **Database File Missing**:
    ```bash
-   # Run migration from parquet files
-   python migrate_to_duckdb.py
+   # Run database initialization
+   python -m config.init_db
    ```
 
 2. **Corrupted Database**:
    ```python
    # Recreate database
    import os
-   if os.path.exists("forecasting.duckdb"):
-       os.remove("forecasting.duckdb")
-   # Then run migration again
+   if os.path.exists("fcst.duckdb"):
+       os.remove("fcst.duckdb")
+   # Then run initialization again
+   python -m config.init_db
    ```
 
 3. **Permission Issues**:
@@ -560,11 +561,11 @@ def recover_database():
     # Backup corrupted database
     if os.path.exists("forecasting.duckdb"):
         shutil.copy("forecasting.duckdb", "forecasting_corrupted.duckdb")
-        os.remove("forecasting.duckdb")
+        os.remove("fcst.duckdb")
     
-    # Recreate from parquet files
-    from migrate_to_duckdb import main as migrate
-    migrate()
+    # Recreate database with initialization
+    import subprocess
+    subprocess.run(["python", "-m", "config.init_db"])
     
     print("Database recovered successfully")
 ```

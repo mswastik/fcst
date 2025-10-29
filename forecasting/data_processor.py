@@ -76,7 +76,7 @@ class ForecastDataProcessor:
         self.hierarchy_loader = HierarchyLoader()
     
     def process_forecasts(self, forecasts: pl.DataFrame, original_df: pl.DataFrame, 
-                         file_path: str) -> pl.DataFrame:
+                         file_path: str = None) -> pl.DataFrame:
         """Process and integrate forecasts with original data."""
         if forecasts is None:
             return None
@@ -103,9 +103,6 @@ class ForecastDataProcessor:
         
         # Merge with original data
         merged_df = self._merge_with_original(original_df, forecasts, model_cols)
-        
-        # Save results
-        merged_df.write_parquet(f"data/{file_path}")
         
         return merged_df
     
@@ -191,22 +188,13 @@ class HierarchyLoader:
     
     def load_product_hierarchy(self) -> pl.DataFrame:
         """Load product hierarchy data."""
-        try:
-            return pl.read_parquet('data/phierarchy.parquet')
-        except Exception:
-            return pl.DataFrame()
+        # Since we now get hierarchy data from database, return empty DataFrame
+        return pl.DataFrame()
     
     def load_location_hierarchy(self) -> pl.DataFrame:
         """Load location hierarchy data."""
-        try:
-            lh = pl.read_parquet('data/lhierarchy.parquet')
-            # Try to drop 'Selling Division' if it exists
-            try:
-                return lh.drop('Selling Division').unique()
-            except Exception:
-                return lh
-        except Exception:
-            return pl.DataFrame()
+        # Since we now get hierarchy data from database, return empty DataFrame
+        return pl.DataFrame()
 
 
 class ValidationProcessor:

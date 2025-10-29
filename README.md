@@ -8,7 +8,7 @@ A comprehensive forecasting application built with NiceGUI that provides advance
 - **Multiple Forecasting Models**: Support for NHITS, ensemble models, and statistical forecasting
 - **Model Validation**: 3-month rolling validation with comprehensive accuracy metrics
 - **🔧 Enhanced Database Service**: Advanced connection pooling, retry logic, and session management
-- **🔐 Flexible Authentication**: Support for both Databricks CLI and OAuth authentication
+- **🔐 Flexible Authentication**: Support for OAuth authentication
 - **Hierarchical Data Support**: Product and location hierarchies for multi-level forecasting
 - **Real-time Visualization**: Interactive charts and dashboards for data exploration
 - **Model Comparison**: Side-by-side comparison of different forecasting approaches
@@ -61,17 +61,16 @@ A comprehensive forecasting application built with NiceGUI that provides advance
    pip install -r requirements.txt
    ```
 
-4. **Initialize database** (if migrating from parquet files)
+4. **Initialize database**
    ```bash
-   python migrate_to_databricks.py
+   python -m config.init_db
    ```
    
-   **Migration Details:**
-   - Converts existing parquet files to Databricks database format
-   - Creates comprehensive database schema with product/location hierarchies
-   - Enables enterprise-grade performance and scalability
-   - Supports concurrent user access and advanced security features
-   - Run only once during initial setup or when updating data sources
+   **Database Initialization:**
+   - Creates DuckDB database with schema for product/location hierarchies
+   - Enables multi-user support with connection pooling
+   - Supports concurrent user access with proper isolation
+   - Stores data in fcst.duckdb file at project root
 
 ## 🚀 Quick Start
 
@@ -176,7 +175,7 @@ fcst/
 - **Dependency Injection**: Modular components with clear interfaces
 - **Database Abstraction**: Clean separation between data access and business logic
 - **Component-Based UI**: Reusable UI components for maintainability
-- **Authentication Flexibility**: Support for both Databricks CLI and OAuth authentication
+- **Authentication Flexibility**: Support for OAuth authentication
 
 ## 🔧 Core Components
 
@@ -313,25 +312,31 @@ class ModelValidator:
 
 **Solutions:**
 ```python
-# Check Databricks database connection
-from databricks.sql import connect
-import os
+# Check DuckDB database connection
+import duckdb
 
-# Verify connection using environment variables
+# Verify connection to fcst.duckdb
 try:
-    connection = connect(
-        server_hostname=os.getenv('DATABRICKS_HOST'),
-        http_path=os.getenv('DATABRICKS_HTTP_PATH'),
-        access_token=os.getenv('DATABRICKS_TOKEN')
-    )
-    print("Databricks connection successful")
+    conn = duckdb.connect('fcst.duckdb')
+    result = conn.execute("SELECT COUNT(*) FROM da.sales_actuals LIMIT 1").fetchone()
+    print(f"DuckDB connection successful. Sample result: {result}")
+    conn.close()
 except Exception as e:
-    print(f"Databricks connection failed: {e}")
+    print(f"DuckDB connection failed: {e}")
 
 # Verify database service
-from db_service import get_database_service
-db = get_database_service()
-print(db.connection.execute("SELECT COUNT(*) FROM sales_actuals").fetchone())
+from core.db_service import get_database_service
+db_service = get_database_service()
+if db_service:
+    # Test basic query
+    from core.utils import DatabaseUtils
+    db = DatabaseUtils.get_database_service()
+    if db:
+        print("Database service available")
+    else:
+        print("Database service not initialized")
+else:
+    print("Database service unavailable")
 ```
 
 #### 2. Memory Issues with Large Datasets
@@ -410,11 +415,6 @@ print(f"Execution time: {time.time() - start_time:.2f}s")
 
 Create a `.env` file:
 ```env
-# Databricks database configuration
-DATABRICKS_HOST=https://your-workspace.databricks.com
-DATABRICKS_HTTP_PATH=/sql/protocolv1/o/your-organization-id/your-cluster-id
-DATABRICKS_TOKEN=your-personal-access-token
-
 # Application settings
 HOST=0.0.0.0
 PORT=8000
@@ -423,7 +423,24 @@ DEBUG=False
 # Model settings
 DEFAULT_FORECAST_HORIZON=12
 VALIDATION_WINDOW_MONTHS=3
+
 ```
+
+### Secure Credentials Configuration
+
+For enhanced security, store database credentials in `config/credentials.json`:
+```json
+{
+  "database": {
+    "server": "your-server-name",
+    "database_name": "your-database-name",
+    "username": "your-username",
+    "password": "your-password"
+  }
+}
+```
+
+The application will automatically use credentials from the JSON file if present, falling back to environment variables if needed.
 
 ### Application Configuration
 

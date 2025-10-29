@@ -1,6 +1,6 @@
 from nicegui import ui, run, app
 import asyncio
-from core.data_model import get_filter_options, generate_sample_data
+from core.data_model import generate_sample_data  # Keep generate_sample_data which might be used
 from core.data_service import apply_filters, create_models_action, change_fc_action
 from core.state_manager import get_global_state
 from core.utils import DataUtils, DatabaseUtils, UIUtils, ErrorHandler

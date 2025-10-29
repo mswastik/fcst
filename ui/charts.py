@@ -1,5 +1,4 @@
 from nicegui import ui
-from core.data_model import get_chart_data
 from core.state_manager import get_global_state
 from core.utils import UIUtils
 import polars as pl
@@ -20,7 +19,9 @@ def render_column_chart(container,filtered_df):
         else:
             print("DEBUG: Attempting to render column chart - not loading")
             try:
-                data = get_chart_data('column', filtered_df)
+                # Update state with filtered data first
+                state.update_filtered_data(filtered_df)
+                data = state.get_chart_data('column')
                 print(f"DEBUG: Column chart data result: {data is not None}")
                 if data:
                     print(f"DEBUG: Column chart data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
@@ -59,7 +60,9 @@ def render_line_chart(container,filtered_df):
         else:
             print("DEBUG: Attempting to render line chart - not loading")
             try:
-                data = get_chart_data('line', filtered_df)
+                # Update state with filtered data first
+                state.update_filtered_data(filtered_df)
+                data = state.get_chart_data('line')
                 print(f"DEBUG: Line chart data result: {data is not None}")
                 if data:
                     print(f"DEBUG: Line chart data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")

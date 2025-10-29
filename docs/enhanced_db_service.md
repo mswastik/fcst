@@ -10,7 +10,7 @@ The Enhanced Database Service is a comprehensive database service that provides:
 - **Retry Logic**: Automatic retry with exponential backoff for failed operations
 - **Session Management**: User isolation and concurrent access support
 - **Health Monitoring**: Real-time connection health checks and performance metrics
-- **Flexible Authentication**: Support for both Databricks CLI and OAuth authentication
+- **Flexible Authentication**: Support for OAuth authentication
 
 ## Classes
 
@@ -33,7 +33,7 @@ def __init__(self):
 **Configuration:**
 - Uses Databricks SDK `Config` for authentication
 - Automatically detects and uses appropriate authentication method
-- Supports both Databricks CLI and OAuth authentication
+- Supports OAuth authentication
 
 #### Core Methods
 
@@ -170,11 +170,11 @@ Closes all sessions for a user.
 
 ### SimpleConnectionPool
 
-Lightweight connection pool that works with Databricks SDK Config.
+Lightweight connection pool that works with DuckDB connections.
 
 ```python
 class SimpleConnectionPool:
-    """Simple connection pool that works with Databricks SDK Config."""
+    """Simple connection pool that works with DuckDB connections."""
 ```
 
 #### Key Features
@@ -188,26 +188,22 @@ class SimpleConnectionPool:
 
 The Enhanced Database Service supports multiple authentication methods:
 
-### Databricks CLI Authentication
+### Authentication
 
-**Automatic**: When no `client_id`/`client_secret` are provided, the service uses Databricks CLI authentication.
+**Automatic**: When no `client_id`/`client_secret` are provided, the service uses environment variables or configuration files for authentication.
 
 **Setup:**
-```bash
-# Install Databricks CLI
-pip install databricks-cli
-
-# Login to Databricks
-databricks auth login
-```
-
-### OAuth Authentication
-
-**Manual**: When `client_id`/`client_secret` are provided, the service uses OAuth authentication.
+### Authentication Setup
 
 **Environment Variables:**
 ```env
-DATABRICKS_HOST=https://your-workspace.databricks.com
+# Database configuration
+DB_PATH=./fcst.duckdb
+
+# OAuth authentication (if needed for external services)
+OAUTH_CLIENT_ID=your-client-id
+OAUTH_CLIENT_SECRET=your-client-secret
+```
 DATABRICKS_CLIENT_ID=your-client-id
 DATABRICKS_CLIENT_SECRET=your-client-secret
 ```
@@ -302,9 +298,9 @@ except Exception as e:
 # Required
 DATABRICKS_HOST=https://your-workspace.databricks.com
 
-# Optional - For OAuth authentication
-DATABRICKS_CLIENT_ID=your-client-id
-DATABRICKS_CLIENT_SECRET=your-client-secret
+# Optional - For OAuth authentication (if needed for external services)
+OAUTH_CLIENT_ID=your-client-id
+OAUTH_CLIENT_SECRET=your-client-secret
 
 # Optional - Connection pool settings
 DB_POOL_SIZE=10
@@ -401,7 +397,7 @@ db = get_enhanced_database_service()
 | Connection Management | Single connection | Connection pooling |
 | Error Handling | Basic | Retry logic + health checks |
 | Session Management | None | User isolation + cleanup |
-| Authentication | Basic | Flexible (CLI + OAuth) |
+| Authentication | Basic | Flexible (OAuth) |
 | Monitoring | None | Health status + statistics |
 | Performance | Good | 10-50x faster |
 | Scalability | Limited | Multi-user support |

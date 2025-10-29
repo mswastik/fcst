@@ -140,7 +140,6 @@ def process_forecasts(self, forecasts: pl.DataFrame, original_df: pl.DataFrame,
 3. **Hierarchy Joining**: Join with product and location hierarchies
 4. **Model Column Detection**: Identify forecast prediction columns
 5. **Data Merging**: Merge forecasts with original data
-6. **Result Saving**: Save to parquet file
 
 ### Private Methods
 
@@ -165,8 +164,8 @@ def _join_hierarchy_data(self, forecasts: pl.DataFrame) -> pl.DataFrame:
 ```
 
 **Hierarchy Data Sources:**
-- Product Hierarchy: `data/phierarchy.parquet`
-- Location Hierarchy: `data/lhierarchy.parquet`
+- Product Hierarchy: Database table `da.product_hierarchy`
+- Location Hierarchy: Database table `da.location_hierarchy`
 
 **Join Keys:**
 - Product: CatalogNumber
@@ -189,7 +188,7 @@ def _merge_with_original(self, original_df: pl.DataFrame, forecasts: pl.DataFram
 
 ## HierarchyLoader
 
-Loads and manages hierarchy data from parquet files.
+Loads and manages hierarchy data from database tables.
 
 ```python
 class HierarchyLoader:
@@ -200,35 +199,35 @@ class HierarchyLoader:
 
 #### `load_product_hierarchy() -> pl.DataFrame`
 
-Loads product hierarchy data from parquet file.
+Loads product hierarchy data from database.
 
 ```python
 def load_product_hierarchy(self) -> pl.DataFrame:
-    """Load product hierarchy data."""
+    """Load product hierarchy data from database."""
 ```
 
 **Returns:**
 - `pl.DataFrame`: Product hierarchy with catalog numbers and classifications
 
-**File:** `data/phierarchy.parquet`
+**Source:** Database table `da.product_hierarchy`
 
 #### `load_location_hierarchy() -> pl.DataFrame`
 
-Loads location hierarchy data from parquet file.
+Loads location hierarchy data from database.
 
 ```python
 def load_location_hierarchy(self) -> pl.DataFrame:
-    """Load location hierarchy data."""
+    """Load location hierarchy data from database."""
 ```
 
 **Returns:**
 - `pl.DataFrame`: Location hierarchy with countries and regions
 
-**File:** `data/lhierarchy.parquet`
+**Source:** Database table `da.location_hierarchy`
 
 **Processing:**
-- Removes 'Selling Division' column if present
-- Returns unique records only
+- Returns data from database table
+- Returns empty DataFrame if database service unavailable
 
 ## ValidationProcessor
 
@@ -283,8 +282,7 @@ clean_df = DataCleaner.prepare_training_data(raw_df)
 processor = ForecastDataProcessor()
 merged_df = processor.process_forecasts(
     forecasts=forecast_results,
-    original_df=original_df,
-    file_path="forecasts_2024.parquet"
+    original_df=original_df
 )
 
 # 3. Validate results
